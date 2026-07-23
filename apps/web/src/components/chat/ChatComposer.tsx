@@ -1904,11 +1904,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
     }
-    // Shift+Enter while the agent is busy sends immediately (bypassing the
-    // mid-turn queue). When idle, Shift+Enter keeps inserting a newline.
+    // Cmd+Enter while the agent is busy sends immediately (bypassing the
+    // mid-turn queue). Shift+Enter always stays a newline.
     if (
       key === "Enter" &&
-      event.shiftKey &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
       !isMobileViewport &&
       (phase === "running" || isSendBusy)
     ) {
