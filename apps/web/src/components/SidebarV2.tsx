@@ -81,11 +81,11 @@ import { formatRelativeTimeLabel } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import {
-  firstValidTimestamp,
   formatWorkingDurationLabel,
   hasUnseenCompletion,
   isTrailingDoubleClick,
   resolveAdjacentThreadId,
+  resolveSettledTimestamp,
   resolveSidebarV2Status,
   resolveWorkingStartedAt,
   shouldNavigateAfterProjectRemoval,
@@ -124,15 +124,10 @@ function threadTimeLabel(thread: SidebarThreadSummary): string {
 }
 
 // Settled rows read "how long ago did this wrap up", matching their sort
-// key; auto-settled threads have no stamp and fall back to last activity.
-// Same candidate chain as sortSettledThreadsForSidebarV2 — a malformed
-// settledAt must fall through identically or label and order disagree.
+// key: both go through resolveSettledTimestamp so label and order can't
+// disagree.
 function settledTimeLabel(thread: SidebarThreadSummary): string {
-  const timestamp = firstValidTimestamp(
-    thread.settledAt,
-    thread.latestUserMessageAt,
-    thread.updatedAt,
-  );
+  const timestamp = resolveSettledTimestamp(thread);
   return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
 }
 
@@ -686,7 +681,6 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 <span className="tabular-nums text-muted-foreground/65 transition-opacity group-hover/v2-row:opacity-0">
                   {topStatus ? (
                     <span
-                      role="status"
                       className={cn(
                         "inline-flex items-center gap-1 font-medium",
                         topStatus.className,
@@ -697,9 +691,14 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                       ) : topStatus.icon === "done" ? (
                         <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                       ) : null}
-                      {topStatus.label}
+                      {/* The label alone is the live region: a role="status"
+                          wrapper around the ticking duration would make
+                          screen readers announce every second. */}
+                      <span role="status">{topStatus.label}</span>
                       {status === "working" ? (
-                        <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                        <span aria-hidden>
+                          <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                        </span>
                       ) : null}
                     </span>
                   ) : (
