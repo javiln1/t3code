@@ -19,6 +19,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 
 export interface PersistedUiState {
   projectExpandedById?: Record<string, boolean>;
+  settledCollapsed?: boolean;
   projectOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
   collapsedProjectCwds?: string[];
@@ -43,10 +44,15 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {
+  settledCollapsed?: boolean;
+}
 
-const initialState: UiState = {
+type HydratedUiState = UiState & { settledCollapsed: boolean };
+
+const initialState: HydratedUiState = {
   projectExpandedById: {},
+  settledCollapsed: false,
   projectOrder: [],
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
@@ -98,7 +104,7 @@ function sanitizeTimestampRecord(value: unknown): Record<string, string> {
   );
 }
 
-export function parsePersistedState(parsed: PersistedUiState): UiState {
+export function parsePersistedState(parsed: PersistedUiState): HydratedUiState {
   const projectExpandedById =
     parsed.projectExpandedById === undefined
       ? (() => {
@@ -124,6 +130,8 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
 
   return {
     projectExpandedById,
+    settledCollapsed:
+      typeof parsed.settledCollapsed === "boolean" ? parsed.settledCollapsed : false,
     projectOrder,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
     threadChangedFilesExpandedById:
@@ -138,7 +146,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
   };
 }
 
-function readPersistedState(): UiState {
+function readPersistedState(): HydratedUiState {
   if (typeof window === "undefined") {
     return initialState;
   }
@@ -202,6 +210,7 @@ export function persistState(state: UiState): void {
       PERSISTED_STATE_KEY,
       JSON.stringify({
         projectExpandedById,
+        settledCollapsed: state.settledCollapsed ?? false,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
@@ -337,6 +346,16 @@ export function setProjectExpanded(
   };
 }
 
+export function setSettledCollapsed(state: UiState, collapsed: boolean): UiState {
+  if (state.settledCollapsed === collapsed) {
+    return state;
+  }
+  return {
+    ...state,
+    settledCollapsed: collapsed,
+  };
+}
+
 export function reorderProjects(
   state: UiState,
   currentProjectOrder: readonly string[],
@@ -382,11 +401,13 @@ export function reorderProjects(
 }
 
 interface UiStateStore extends UiState {
+  settledCollapsed: boolean;
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
+  setSettledCollapsed: (collapsed: boolean) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
     draggedProjectIds: readonly string[],
@@ -406,6 +427,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
+  setSettledCollapsed: (collapsed) => set((state) => setSettledCollapsed(state, collapsed)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
