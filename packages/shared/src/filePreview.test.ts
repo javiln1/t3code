@@ -14,13 +14,20 @@ import {
 } from "./filePreview.ts";
 
 describe("workspace file previews", () => {
-  it.each(["report.html", "report.HTM", "document#draft.pdf", "reports?old/document.pdf"])(
-    "recognizes browser preview path %s",
-    (path) => {
-      expect(isWorkspaceBrowserPreviewPath(path)).toBe(true);
-      expect(isWorkspacePreviewEntryPath(path)).toBe(true);
-    },
-  );
+  it.each([
+    "report.html",
+    "report.HTM",
+    "document#draft.pdf",
+    "reports?old/document.pdf",
+    "notes.txt",
+    "README.md",
+    "data.json",
+    "export.csv",
+    "server.log",
+  ])("recognizes browser preview path %s", (path) => {
+    expect(isWorkspaceBrowserPreviewPath(path)).toBe(true);
+    expect(isWorkspacePreviewEntryPath(path)).toBe(true);
+  });
 
   it.each([
     "icon.png",
@@ -37,14 +44,10 @@ describe("workspace file previews", () => {
   });
 
   it.each([
-    "README.md",
     "src/index.ts",
     "image.png.ts",
     "png",
-    "image.png#notes.txt",
-    "image.svg?notes.txt",
     "document.pdf?download=1",
-    "report.html#notes.txt",
     "image%2Epng",
   ])("rejects non-preview path %s", (path) => {
     expect(isWorkspacePreviewEntryPath(path)).toBe(false);
@@ -55,7 +58,7 @@ describe("workspace file previews", () => {
     expect(isWorkspaceAudioPreviewPath("recording.wav.ts")).toBe(false);
     expect(hostPreviewMimeTypeFromExtension(".m4a")).toBe("audio/mp4");
     expect(hostPreviewMimeTypeFromExtension(".mp4")).toBe("video/mp4");
-    expect(hostPreviewMimeTypeFromExtension(".txt")).toBeNull();
+    expect(hostPreviewMimeTypeFromExtension(".txt")).toBe("text/plain");
   });
 });
 
