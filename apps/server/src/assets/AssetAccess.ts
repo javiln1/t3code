@@ -479,11 +479,31 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
     const path = yield* Path.Path;
     const fileSystem = yield* FileSystem.FileSystem;
     const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
-    const relativePath = path.isAbsolute(input.requestedPath)
+    let workspaceRoot = input.workspaceRoot;
+    let relativePath = path.isAbsolute(input.requestedPath)
       ? path.relative(input.workspaceRoot, input.requestedPath)
       : input.requestedPath;
+    if (
+      path.isAbsolute(input.requestedPath) &&
+      (relativePath === ".." ||
+        relativePath.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativePath))
+    ) {
+      workspaceRoot = yield* workspacePaths
+        .normalizeWorkspaceRoot(path.dirname(input.requestedPath))
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AssetWorkspaceRootNormalizationError({
+                resource: input.resource,
+                cause,
+              }),
+          ),
+        );
+      relativePath = path.basename(input.requestedPath);
+    }
     const resolved = yield* workspacePaths
-      .resolveRelativePathWithinRoot({ workspaceRoot: input.workspaceRoot, relativePath })
+      .resolveRelativePathWithinRoot({ workspaceRoot, relativePath })
       .pipe(
         Effect.mapError(
           (cause) =>
@@ -503,7 +523,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
       });
     }
     const canonicalFile = yield* resolveCanonicalWorkspaceFile({
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot,
       relativePath: resolved.relativePath,
     }).pipe(
       Effect.mapError(
@@ -526,7 +546,7 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
         expectedCanonicalPath: canonicalFile,
       });
     }
-    const canonicalWorkspaceRoot = yield* fileSystem.realPath(input.workspaceRoot).pipe(
+    const canonicalWorkspaceRoot = yield* fileSystem.realPath(workspaceRoot).pipe(
       Effect.mapError(
         (cause) =>
           new AssetWorkspaceResolutionError({
