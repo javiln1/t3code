@@ -4870,6 +4870,7 @@ function ChatViewContent(props: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
+      if (sendBusyNow) return;
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -4877,6 +4878,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (!hasSendableContent) {
+      if (sendBusyNow) return;
       if (expiredTerminalContextCount > 0) {
         const toastCopy = buildExpiredTerminalContextToastCopy(
           expiredTerminalContextCount,
@@ -4893,6 +4895,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (!activeProject) {
+      if (sendBusyNow) return;
       toastManager.add(
         stackedThreadToast({
           type: "warning",
@@ -4904,14 +4907,22 @@ function ChatViewContent(props: ChatViewProps) {
     }
     // Mid-turn text-only sends queue instead of steering; the queue drains
     // when the turn settles. Attachments/contexts still steer immediately so
-    // their transient payloads are never parked client-side.
+    // their transient payloads are never parked client-side. The busy signal
+    // is deliberately broad (running turn, unsettled turn, or a dispatch in
+    // flight) so the moments just after sending still queue instead of
+    // steering or dropping. Shift+Enter arrives with bypassQueue to steer.
     const hasNonTextPayload =
       composerImages.length > 0 ||
       sendableComposerTerminalContexts.length > 0 ||
       composerElementContexts.length > 0 ||
       composerPreviewAnnotations.length > 0 ||
       composerReviewComments.length > 0;
-    if (phase === "running" && isServerThread && !latestTurnSettled && !hasNonTextPayload) {
+    // isLatestTurnSettled is false for threads with no turns at all — require
+    // an actual turn before treating "unsettled" as busy, or first messages
+    // would queue with nothing to drain them.
+    const latestTurnUnsettled = activeLatestTurn != null && !latestTurnSettled;
+    const agentBusyForQueue = phase === "running" || latestTurnUnsettled || sendBusyNow;
+    if (agentBusyForQueue && isServerThread && !hasNonTextPayload && !options?.bypassQueue) {
       setQueuedMessagesByThreadKey((existing) => ({
         ...existing,
         [routeThreadKey]: [
@@ -4924,6 +4935,7 @@ function ChatViewContent(props: ChatViewProps) {
       composerRef.current?.resetCursorState();
       return;
     }
+    if (sendBusyNow) return;
 
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;

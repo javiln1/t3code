@@ -571,7 +571,7 @@ export interface ChatComposerProps {
   composerRef: React.RefObject<ChatComposerHandle | null>;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (e?: { preventDefault: () => void }, options?: { bypassQueue?: boolean }) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -1903,6 +1903,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onSelectComposerItem(selectedItem);
         return true;
       }
+    }
+    // Shift+Enter while the agent is busy sends immediately (bypassing the
+    // mid-turn queue). When idle, Shift+Enter keeps inserting a newline.
+    if (
+      key === "Enter" &&
+      event.shiftKey &&
+      !isMobileViewport &&
+      (phase === "running" || isSendBusy)
+    ) {
+      submitComposer(undefined, { bypassQueue: true });
+      return true;
     }
     if (
       key === "Enter" &&
