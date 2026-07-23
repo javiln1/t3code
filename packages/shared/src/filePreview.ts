@@ -1,4 +1,13 @@
-export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = [".htm", ".html", ".pdf"] as const;
+export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = [
+  ".htm",
+  ".html",
+  ".pdf",
+  ".txt",
+  ".md",
+  ".json",
+  ".csv",
+  ".log",
+] as const;
 
 export const WORKSPACE_IMAGE_PREVIEW_EXTENSIONS = [
   ".avif",
