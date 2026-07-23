@@ -39,6 +39,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  resolveComposerSendNowAction,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
 import {
@@ -1906,16 +1907,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     }
     // "Composer: Send Now" (default Cmd/Ctrl+Enter, rebindable in Settings →
-    // Keybindings) while the agent is busy sends immediately, bypassing the
-    // mid-turn queue. Shift+Enter always stays a newline. Note: only chords
-    // built on Enter reach this handler, so keep the binding on modifier+Enter.
+    // Keybindings) sends the current draft immediately. If queueing already
+    // cleared the composer, it sends the newest queued item instead.
     if (
       key === "Enter" &&
       !isMobileViewport &&
       (phase === "running" || isSendBusy) &&
       resolveShortcutCommand(event, keybindings) === "composer.sendNow"
     ) {
-      submitComposer(undefined, { bypassQueue: true });
+      const action = resolveComposerSendNowAction({
+        hasSendableDraft: composerSendState.hasSendableContent,
+        queuedMessageCount: queuedMessages.length,
+      });
+      if (action === "draft") {
+        submitComposer(undefined, { bypassQueue: true });
+      } else if (action === "latest-queued") {
+        const latestQueued = queuedMessages[queuedMessages.length - 1];
+        if (latestQueued) onSendQueuedMessageNow(latestQueued.id);
+      }
       return true;
     }
     if (

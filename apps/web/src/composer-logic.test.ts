@@ -8,6 +8,7 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
+  resolveComposerSendNowAction,
   shouldSubmitComposerOnEnter,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
@@ -23,6 +24,35 @@ describe("shouldSubmitComposerOnEnter", () => {
 
   it("inserts a newline for Shift+Enter", () => {
     expect(shouldSubmitComposerOnEnter({ isMobileViewport: false, shiftKey: true })).toBe(false);
+  });
+});
+
+describe("resolveComposerSendNowAction", () => {
+  it("sends the current draft when it has content", () => {
+    expect(
+      resolveComposerSendNowAction({
+        hasSendableDraft: true,
+        queuedMessageCount: 2,
+      }),
+    ).toBe("draft");
+  });
+
+  it("sends the latest queued message when the composer is empty", () => {
+    expect(
+      resolveComposerSendNowAction({
+        hasSendableDraft: false,
+        queuedMessageCount: 2,
+      }),
+    ).toBe("latest-queued");
+  });
+
+  it("does nothing when both the composer and queue are empty", () => {
+    expect(
+      resolveComposerSendNowAction({
+        hasSendableDraft: false,
+        queuedMessageCount: 0,
+      }),
+    ).toBe(null);
   });
 });
 

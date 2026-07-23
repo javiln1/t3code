@@ -18,6 +18,14 @@ export function shouldSubmitComposerOnEnter(input: {
   return !input.isMobileViewport && !input.shiftKey;
 }
 
+export function resolveComposerSendNowAction(input: {
+  hasSendableDraft: boolean;
+  queuedMessageCount: number;
+}): "draft" | "latest-queued" | null {
+  if (input.hasSendableDraft) return "draft";
+  return input.queuedMessageCount > 0 ? "latest-queued" : null;
+}
+
 const isInlineTokenSegment = (
   segment:
     | { type: "text"; text: string }
