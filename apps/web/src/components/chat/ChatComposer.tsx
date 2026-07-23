@@ -41,7 +41,11 @@ import {
   replaceTextRange,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
-import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import {
+  deriveComposerSendState,
+  readFileAsDataUrl,
+  type QueuedComposerMessage,
+} from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -192,6 +196,7 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
+  ArrowUpIcon,
   BotIcon,
   CircleAlertIcon,
   PencilRulerIcon,
@@ -594,6 +599,11 @@ export interface ChatComposerProps {
   scheduleComposerFocus: () => void;
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
+
+  // Messages queued while the agent runs; drained when the turn settles.
+  queuedMessages: ReadonlyArray<QueuedComposerMessage>;
+  onRemoveQueuedMessage: (id: string) => void;
+  onSendQueuedMessageNow: (id: string) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -604,6 +614,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const {
     composerDraftTarget,
     environmentId,
+    queuedMessages,
+    onRemoveQueuedMessage,
+    onSendQueuedMessageNow,
     routeKind,
     routeThreadRef,
     draftId,
@@ -3015,6 +3028,51 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     ))}
                 </div>
               )}
+
+            {queuedMessages.length > 0 && (
+              <div className="flex flex-col gap-1 pb-1.5">
+                {queuedMessages.map((queued) => (
+                  <div
+                    key={queued.id}
+                    className={`group flex items-center gap-2 rounded-lg border px-2.5 py-1.5 ${
+                      queued.failed
+                        ? "border-destructive/40 bg-destructive/5"
+                        : "border-border/60 bg-muted/30"
+                    }`}
+                  >
+                    {queued.failed ? (
+                      <CircleAlertIcon className="size-3.5 shrink-0 text-destructive/70" />
+                    ) : (
+                      <ClockIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      {queued.text}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/50">
+                      {queued.failed ? "Failed" : "Queued"}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => onSendQueuedMessageNow(queued.id)}
+                      aria-label="Send queued message now"
+                      title="Send now"
+                    >
+                      <ArrowUpIcon />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => onRemoveQueuedMessage(queued.id)}
+                      aria-label="Remove queued message"
+                      title="Remove"
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="relative">
               <ComposerPromptEditor

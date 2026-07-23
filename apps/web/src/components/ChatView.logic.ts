@@ -25,6 +25,14 @@ import type { DraftThreadEnvMode } from "../composerDraftStore";
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const RIGHT_PANEL_MAXIMIZED_KEY = "t3code:right-panel-maximized";
 export const RightPanelMaximizedSchema = Schema.Boolean;
+
+// A composer message captured while the agent was mid-turn. Auto-sent when the
+// turn settles; `failed` entries stay visible instead of retrying in a loop.
+export interface QueuedComposerMessage {
+  id: string;
+  text: string;
+  failed?: boolean;
+}
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 

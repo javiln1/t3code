@@ -284,6 +284,7 @@ import {
   LastInvokedScriptByProjectSchema,
   RIGHT_PANEL_MAXIMIZED_KEY,
   RightPanelMaximizedSchema,
+  type QueuedComposerMessage,
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
@@ -333,6 +334,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_QUEUED_MESSAGES: QueuedComposerMessage[] = [];
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1324,6 +1326,9 @@ function ChatViewContent(props: ChatViewProps) {
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
+  const [queuedMessagesByThreadKey, setQueuedMessagesByThreadKey] = useState<
+    Record<string, QueuedComposerMessage[]>
+  >({});
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -4897,6 +4902,29 @@ function ChatViewContent(props: ChatViewProps) {
       );
       return;
     }
+    // Mid-turn text-only sends queue instead of steering; the queue drains
+    // when the turn settles. Attachments/contexts still steer immediately so
+    // their transient payloads are never parked client-side.
+    const hasNonTextPayload =
+      composerImages.length > 0 ||
+      sendableComposerTerminalContexts.length > 0 ||
+      composerElementContexts.length > 0 ||
+      composerPreviewAnnotations.length > 0 ||
+      composerReviewComments.length > 0;
+    if (phase === "running" && isServerThread && !latestTurnSettled && !hasNonTextPayload) {
+      setQueuedMessagesByThreadKey((existing) => ({
+        ...existing,
+        [routeThreadKey]: [
+          ...(existing[routeThreadKey] ?? []),
+          { id: newMessageId(), text: trimmed },
+        ],
+      }));
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return;
+    }
+
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
@@ -5535,6 +5563,181 @@ function ChatViewContent(props: ChatViewProps) {
       composerRef,
     ],
   );
+
+  const removeQueuedMessage = useCallback(
+    (queuedId: string) => {
+      setQueuedMessagesByThreadKey((existing) => {
+        const queue = existing[routeThreadKey];
+        if (!queue?.some((queued) => queued.id === queuedId)) return existing;
+        return {
+          ...existing,
+          [routeThreadKey]: queue.filter((queued) => queued.id !== queuedId),
+        };
+      });
+    },
+    [routeThreadKey],
+  );
+
+  // Text-only direct send for queued messages: the existing-thread subset of
+  // onSend (no bootstrap, no attachments), mirroring onSubmitPlanFollowUp.
+  const sendQueuedMessage = useCallback(
+    async (queued: QueuedComposerMessage): Promise<boolean> => {
+      if (
+        !activeThread ||
+        !isServerThread ||
+        isSendBusy ||
+        isConnecting ||
+        sendInFlightRef.current
+      ) {
+        return false;
+      }
+      const sendCtx = composerRef.current?.getSendContext();
+      if (!sendCtx?.providerAvailable) return false;
+      const {
+        selectedProvider: ctxSelectedProvider,
+        selectedModel: ctxSelectedModel,
+        selectedProviderModels: ctxSelectedProviderModels,
+        selectedPromptEffort: ctxSelectedPromptEffort,
+        selectedModelSelection: ctxSelectedModelSelection,
+      } = sendCtx;
+
+      const threadIdForSend = activeThread.id;
+      const messageIdForSend = newMessageId();
+      const messageCreatedAt = new Date().toISOString();
+      const outgoingMessageText = formatOutgoingPrompt({
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        models: ctxSelectedProviderModels,
+        effort: ctxSelectedPromptEffort,
+        text: queued.text,
+      });
+
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: false });
+      setThreadError(threadIdForSend, null);
+
+      isAtEndRef.current = true;
+      timelineScrollModeRef.current = "anchoring-new-turn";
+      liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+      pendingTimelineAnchorRef.current = messageIdForSend;
+      activeTimelineAnchorIndexRef.current = null;
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+      setTimelineAnchor({
+        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+        messageId: messageIdForSend,
+      });
+
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: outgoingMessageText,
+          turnId: null,
+          createdAt: messageCreatedAt,
+          updatedAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+
+      const startResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: [],
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: activeThread.title,
+          runtimeMode,
+          interactionMode,
+          createdAt: messageCreatedAt,
+        },
+      });
+      if (startResult._tag !== "Failure") {
+        sendInFlightRef.current = false;
+        return true;
+      }
+
+      setOptimisticUserMessages((existing) =>
+        existing.filter((message) => message.id !== messageIdForSend),
+      );
+      if (!isAtomCommandInterrupted(startResult)) {
+        const error = squashAtomCommandFailure(startResult);
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error ? error.message : "Failed to send queued message.",
+        );
+      }
+      sendInFlightRef.current = false;
+      resetLocalDispatch();
+      return false;
+    },
+    [
+      activeThread,
+      beginLocalDispatch,
+      composerRef,
+      environmentId,
+      interactionMode,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      resetLocalDispatch,
+      runtimeMode,
+      setThreadError,
+      startThreadTurn,
+    ],
+  );
+
+  const sendQueuedMessageNow = useCallback(
+    (queuedId: string) => {
+      const queued = (queuedMessagesByThreadKey[routeThreadKey] ?? []).find(
+        (entry) => entry.id === queuedId,
+      );
+      if (!queued) return;
+      removeQueuedMessage(queuedId);
+      void sendQueuedMessage(queued).then((sent) => {
+        if (sent) return;
+        setQueuedMessagesByThreadKey((existing) => ({
+          ...existing,
+          [routeThreadKey]: [{ ...queued, failed: true }, ...(existing[routeThreadKey] ?? [])],
+        }));
+      });
+    },
+    [queuedMessagesByThreadKey, removeQueuedMessage, routeThreadKey, sendQueuedMessage],
+  );
+
+  // Drain one queued message per settled turn; the next drains when that
+  // turn settles in its own right. Failed entries stay parked (no retry loop).
+  useEffect(() => {
+    if (phase === "running" || !latestTurnSettled) return;
+    if (isSendBusy || isConnecting || sendInFlightRef.current) return;
+    const nextQueued = (queuedMessagesByThreadKey[routeThreadKey] ?? []).find(
+      (queued) => !queued.failed,
+    );
+    if (!nextQueued) return;
+    removeQueuedMessage(nextQueued.id);
+    void sendQueuedMessage(nextQueued).then((sent) => {
+      if (sent) return;
+      setQueuedMessagesByThreadKey((existing) => ({
+        ...existing,
+        [routeThreadKey]: [{ ...nextQueued, failed: true }, ...(existing[routeThreadKey] ?? [])],
+      }));
+    });
+  }, [
+    isConnecting,
+    isSendBusy,
+    latestTurnSettled,
+    phase,
+    queuedMessagesByThreadKey,
+    removeQueuedMessage,
+    routeThreadKey,
+    sendQueuedMessage,
+  ]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     if (
