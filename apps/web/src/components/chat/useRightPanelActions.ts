@@ -3,7 +3,12 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { ThreadPreviewState } from "../../previewStateStore";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
-import { resolveExplicitDiffOpenOnActivate } from "../ChatView.logic";
+import {
+  resolveExplicitDiffOpenOnActivate,
+  RIGHT_PANEL_MAXIMIZED_KEY,
+  RightPanelMaximizedSchema,
+} from "../ChatView.logic";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { type ScopedThreadRef, type RunId } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -96,6 +101,18 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     explicitDiffOpenRef,
     onDiffPanelOpen,
   } = input;
+
+  const [rightPanelMaximizedPreference, setRightPanelMaximizedPreference] = useLocalStorage(
+    RIGHT_PANEL_MAXIMIZED_KEY,
+    false,
+    RightPanelMaximizedSchema,
+  );
+  // Restore the remembered maximize preference whenever the panel becomes
+  // maximizable for the current thread (open, un-maximize, open → maximized).
+  useEffect(() => {
+    if (!canMaximizeRightPanel || !rightPanelMaximizedPreference || !activeThreadRef) return;
+    useRightPanelStore.getState().setMaximized(activeThreadRef, true);
+  }, [activeThreadRef, canMaximizeRightPanel, rightPanelMaximizedPreference]);
 
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const onToggleDiff = () => {
@@ -248,6 +265,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     if (!canMaximizeRightPanel || !activeThreadRef) return;
     if (!rightPanelMaximized) requestWorkspaceFocus({ area: "panel" });
     useRightPanelStore.getState().setMaximized(activeThreadRef, !rightPanelMaximized);
+    setRightPanelMaximizedPreference(!rightPanelMaximized);
   };
   const toggleRightPanelMaximizedStable = useStableCallback(toggleRightPanelMaximized);
   const moveRightPanelSurface = (surfaceId: string, toIndex: number) => {
