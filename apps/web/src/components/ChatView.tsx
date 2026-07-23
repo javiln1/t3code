@@ -488,6 +488,8 @@ import {
   getStartedThreadModelChangeBlockReason,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
+  RIGHT_PANEL_MAXIMIZED_KEY,
+  RightPanelMaximizedSchema,
   type LocalDispatchSnapshot,
   cloneComposerImageForRetry,
   deriveLockedProvider,
@@ -1334,6 +1336,11 @@ export default function ChatView(props: ChatViewProps) {
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
   ] = useState<Record<string, boolean>>({});
+  const [rightPanelMaximizedPreference, setRightPanelMaximizedPreference] = useLocalStorage(
+    RIGHT_PANEL_MAXIMIZED_KEY,
+    false,
+    RightPanelMaximizedSchema,
+  );
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -1680,6 +1687,13 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
+
+  // Restore the remembered maximize preference whenever the panel becomes
+  // maximizable for the current thread (open, un-maximize, open → maximized).
+  useEffect(() => {
+    if (!canMaximizeRightPanel || !rightPanelMaximizedPreference || !activeThreadRef) return;
+    useRightPanelStore.getState().setMaximized(activeThreadRef, true);
+  }, [activeThreadRef, canMaximizeRightPanel, rightPanelMaximizedPreference]);
 
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
@@ -3834,6 +3848,7 @@ export default function ChatView(props: ChatViewProps) {
   const toggleRightPanelMaximized = () => {
     if (!canMaximizeRightPanel || !activeThreadRef) return;
     useRightPanelStore.getState().setMaximized(activeThreadRef, !rightPanelMaximized);
+    setRightPanelMaximizedPreference(!rightPanelMaximized);
   };
   const toggleRightPanelMaximizedStable = useStableCallback(toggleRightPanelMaximized);
   const {
