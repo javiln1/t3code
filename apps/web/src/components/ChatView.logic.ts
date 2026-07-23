@@ -33,6 +33,18 @@ export interface QueuedComposerMessage {
   text: string;
   failed?: boolean;
 }
+
+export function canDrainQueuedComposerMessage(input: {
+  phase: SessionPhase;
+  isSendBusy: boolean;
+  isConnecting: boolean;
+  isSendInFlight: boolean;
+}): boolean {
+  return (
+    input.phase !== "running" && !input.isSendBusy && !input.isConnecting && !input.isSendInFlight
+  );
+}
+
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
