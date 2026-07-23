@@ -224,6 +224,7 @@ import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
+  ArrowUpIcon,
   BotIcon,
   CircleAlertIcon,
   PencilRulerIcon,
@@ -632,6 +633,11 @@ export interface ChatComposerProps {
   scheduleComposerFocus: () => void;
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
+
+  // Messages queued while the agent runs; drained when the turn settles.
+  queuedMessages: ReadonlyArray<QueuedComposerMessage>;
+  onRemoveQueuedMessage: (id: string) => void;
+  onSendQueuedMessageNow: (id: string) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -642,6 +648,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const {
     composerDraftTarget,
     environmentId,
+    queuedMessages,
+    onRemoveQueuedMessage,
+    onSendQueuedMessageNow,
     routeKind,
     routeThreadRef,
     draftId,
