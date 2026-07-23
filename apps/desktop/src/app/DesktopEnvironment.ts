@@ -89,7 +89,7 @@ function resolveDesktopAppStageLabel(input: {
     return "Dev";
   }
 
-  return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Javi";
+  return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Dev";
 }
 
 function resolveDesktopAppBranding(input: {
