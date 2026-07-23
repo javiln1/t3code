@@ -494,6 +494,18 @@ export function firstValidTimestampMs(
   return 0;
 }
 
+/** String twin of firstValidTimestampMs for callers that need the ISO string
+    (display labels, tick anchors) rather than epoch ms. */
+export function firstValidTimestamp(
+  ...candidates: ReadonlyArray<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    if (!Number.isNaN(Date.parse(candidate))) return candidate;
+  }
+  return null;
+}
+
 // v2 sort: static creation order, newest thread on top. Activity NEVER
 // reorders the list — a row holds its position from open until settled, so
 // the screen only moves at lifecycle transitions. Status (including pending
@@ -506,6 +518,48 @@ export function sortThreadsForSidebarV2<
       parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt) ||
       left.id.localeCompare(right.id),
   );
+}
+
+// Settled rows are history, so they order by when the work ENDED, not when
+// the thread was created or last touched. Explicit settles stamp settledAt;
+// auto-settled threads (inactivity, merged/closed PR) carry no stamp and
+// fall back to last activity so they still interleave sensibly.
+export function sortSettledThreadsForSidebarV2<
+  T extends {
+    readonly id: string;
+    readonly updatedAt: string;
+    readonly settledAt: string | null;
+    readonly latestUserMessageAt: string | null;
+  },
+>(threads: readonly T[]): T[] {
+  return [...threads].toSorted(
+    (left, right) =>
+      firstValidTimestampMs(right.settledAt, right.latestUserMessageAt, right.updatedAt) -
+        firstValidTimestampMs(left.settledAt, left.latestUserMessageAt, left.updatedAt) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+/** The timestamp a working thread's elapsed label counts from: the running
+    turn's start (request time until adoption), falling back to the session's
+    last transition when the turn projection lags behind. Malformed
+    timestamps fall through to the next candidate, not just missing ones. */
+export function resolveWorkingStartedAt(
+  thread: Pick<SidebarThreadSummary, "latestTurn" | "session">,
+): string | null {
+  const turn = thread.latestTurn;
+  if (turn && turn.completedAt === null) {
+    return firstValidTimestamp(turn.startedAt, turn.requestedAt, thread.session?.updatedAt);
+  }
+  return firstValidTimestamp(thread.session?.updatedAt);
+}
+
+export function formatWorkingDurationLabel(elapsedMs: number): string {
+  const seconds = Number.isFinite(elapsedMs) ? Math.max(0, Math.floor(elapsedMs / 1000)) : 0;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 export function resolveThreadStatusPill(input: {

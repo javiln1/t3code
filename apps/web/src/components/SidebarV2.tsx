@@ -81,12 +81,15 @@ import { formatRelativeTimeLabel } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import {
-  firstValidTimestampMs,
+  firstValidTimestamp,
+  formatWorkingDurationLabel,
   hasUnseenCompletion,
   isTrailingDoubleClick,
   resolveAdjacentThreadId,
   resolveSidebarV2Status,
+  resolveWorkingStartedAt,
   shouldNavigateAfterProjectRemoval,
+  sortSettledThreadsForSidebarV2,
   sortThreadsForSidebarV2,
 } from "./Sidebar.logic";
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
@@ -118,6 +121,49 @@ function compactSidebarTimeLabel(label: string): string {
 function threadTimeLabel(thread: SidebarThreadSummary): string {
   const timestamp = thread.latestUserMessageAt ?? thread.updatedAt;
   return compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+}
+
+// Settled rows read "how long ago did this wrap up", matching their sort
+// key; auto-settled threads have no stamp and fall back to last activity.
+// Same candidate chain as sortSettledThreadsForSidebarV2 — a malformed
+// settledAt must fall through identically or label and order disagree.
+function settledTimeLabel(thread: SidebarThreadSummary): string {
+  const timestamp = firstValidTimestamp(
+    thread.settledAt,
+    thread.latestUserMessageAt,
+    thread.updatedAt,
+  );
+  return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+}
+
+// Floats at the row's right edge, vertically centered, while the jump
+// modifier is held. An overlay pill instead of an inline slot: the hint
+// must neither displace the status/time label (holding ⌘ used to blank
+// out "Working") nor shift any layout when it appears. pointer-events-none
+// so it never swallows clicks meant for the settle/un-settle buttons it
+// can overlap.
+function JumpHintBadge(props: { label: string }) {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
+    >
+      {props.label}
+    </span>
+  );
+}
+
+// Self-ticking so only this span re-renders each second, not the whole row.
+function WorkingDuration(props: { startedAt: string | null }) {
+  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (Number.isNaN(startedMs)) return;
+    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
+    return () => window.clearInterval(id);
+  }, [startedMs]);
+  if (Number.isNaN(startedMs)) return null;
+  return <span className="tabular-nums">{formatWorkingDurationLabel(Date.now() - startedMs)}</span>;
 }
 
 function SidebarV2ThreadTooltip({
@@ -264,6 +310,11 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarV2Status(thread);
   const shouldRecede = status === "ready" && !isUnread && !props.isActive && !isSelected;
+  // In-flight rows (working, or waiting on approval/input) fade as a whole:
+  // there is nothing for the user to do yet, so prominence is reserved for
+  // rows that need a human — done (unread), read-but-unsettled, and failed.
+  // The status label keeps its hue, so waiting rows stay findable.
+  const isInFlight = status === "working" || status === "approval" || status === "input";
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
@@ -449,6 +500,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         : shouldRecede
           ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
           : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
+    isInFlight &&
+      !props.isActive &&
+      !isSelected &&
+      "opacity-70 transition-opacity hover:opacity-100",
   );
 
   const title = isRenaming ? (
@@ -558,10 +613,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
               <span className="inline-flex justify-end tabular-nums text-muted-foreground/55 transition-opacity group-hover/v2-row:opacity-0">
                 <span className="text-xs">
-                  {props.jumpLabel ??
-                    compactSidebarTimeLabel(
-                      formatRelativeTimeLabel(thread.latestUserMessageAt ?? thread.updatedAt),
-                    )}
+                  {variantAction === "unsettle"
+                    ? settledTimeLabel(thread)
+                    : threadTimeLabel(thread)}
                 </span>
               </span>
               {!props.settlementSupported ? null : variantAction === "unsettle" ? (
@@ -584,6 +638,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 </button>
               )}
             </span>
+            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
@@ -629,9 +684,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               )}
               <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-xs">
                 <span className="tabular-nums text-muted-foreground/65 transition-opacity group-hover/v2-row:opacity-0">
-                  {props.jumpLabel ? (
-                    props.jumpLabel
-                  ) : topStatus ? (
+                  {topStatus ? (
                     <span
                       role="status"
                       className={cn(
@@ -645,6 +698,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                         <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                       ) : null}
                       {topStatus.label}
+                      {status === "working" ? (
+                        <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                      ) : null}
                     </span>
                   ) : (
                     threadTimeLabel(thread)
@@ -698,6 +754,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               </span>
             </div>
           </div>
+          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
@@ -951,11 +1008,7 @@ export default function SidebarV2() {
     }
     return {
       activeThreads: sortThreadsForSidebarV2(active),
-      settledThreads: settled.toSorted(
-        (left, right) =>
-          firstValidTimestampMs(right.latestUserMessageAt, right.updatedAt) -
-          firstValidTimestampMs(left.latestUserMessageAt, left.updatedAt),
-      ),
+      settledThreads: sortSettledThreadsForSidebarV2(settled),
     };
   }, [
     autoSettleAfterDays,
