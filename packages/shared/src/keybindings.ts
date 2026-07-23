@@ -22,6 +22,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+b", command: "sidebar.toggle" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+shift+b", command: "rightPanel.toggle" },
+  { key: "mod+enter", command: "composer.sendNow", when: "!terminalFocus" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
