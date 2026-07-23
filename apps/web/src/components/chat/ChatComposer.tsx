@@ -46,6 +46,7 @@ import {
   readFileAsDataUrl,
   type QueuedComposerMessage,
 } from "../ChatView.logic";
+import { resolveShortcutCommand } from "../../keybindings";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -1904,14 +1905,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
     }
-    // Cmd+Enter while the agent is busy sends immediately (bypassing the
-    // mid-turn queue). Shift+Enter always stays a newline.
+    // "Composer: Send Now" (default Cmd/Ctrl+Enter, rebindable in Settings →
+    // Keybindings) while the agent is busy sends immediately, bypassing the
+    // mid-turn queue. Shift+Enter always stays a newline. Note: only chords
+    // built on Enter reach this handler, so keep the binding on modifier+Enter.
     if (
       key === "Enter" &&
-      (event.metaKey || event.ctrlKey) &&
-      !event.shiftKey &&
       !isMobileViewport &&
-      (phase === "running" || isSendBusy)
+      (phase === "running" || isSendBusy) &&
+      resolveShortcutCommand(event, keybindings) === "composer.sendNow"
     ) {
       submitComposer(undefined, { bypassQueue: true });
       return true;
