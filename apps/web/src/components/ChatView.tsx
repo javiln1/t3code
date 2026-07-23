@@ -306,6 +306,7 @@ import {
   buildLocalDraftThread,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
+  canDrainQueuedComposerMessage,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -6017,11 +6018,21 @@ function ChatViewContent(props: ChatViewProps) {
     [queuedMessagesByThreadKey, removeQueuedMessage, routeThreadKey, sendQueuedMessage],
   );
 
-  // Drain one queued message per settled turn; the next drains when that
-  // turn settles in its own right. Failed entries stay parked (no retry loop).
+  // Drain one queued message after the active run ends; the next drains after
+  // its own run ends. Do not wait on latestTurnSettled here: that timestamp can
+  // lag behind the authoritative session phase and otherwise strand the queue.
+  // Failed entries stay parked (no retry loop).
   useEffect(() => {
-    if (phase === "running" || !latestTurnSettled) return;
-    if (isSendBusy || isConnecting || sendInFlightRef.current) return;
+    if (
+      !canDrainQueuedComposerMessage({
+        phase,
+        isSendBusy,
+        isConnecting,
+        isSendInFlight: sendInFlightRef.current,
+      })
+    ) {
+      return;
+    }
     const nextQueued = (queuedMessagesByThreadKey[routeThreadKey] ?? []).find(
       (queued) => !queued.failed,
     );
@@ -6037,7 +6048,6 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     isConnecting,
     isSendBusy,
-    latestTurnSettled,
     phase,
     queuedMessagesByThreadKey,
     removeQueuedMessage,
