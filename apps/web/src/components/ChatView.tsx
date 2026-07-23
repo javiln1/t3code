@@ -528,6 +528,8 @@ import {
   getStartedThreadModelChangeBlockReason,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
+  RIGHT_PANEL_MAXIMIZED_KEY,
+  RightPanelMaximizedSchema,
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
@@ -1953,6 +1955,11 @@ export default function ChatView(props: ChatViewProps) {
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
   ] = useState<Record<string, boolean>>({});
+  const [rightPanelMaximizedPreference, setRightPanelMaximizedPreference] = useLocalStorage(
+    RIGHT_PANEL_MAXIMIZED_KEY,
+    false,
+    RightPanelMaximizedSchema,
+  );
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -2398,6 +2405,13 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
+
+  // Restore the remembered maximize preference whenever the panel becomes
+  // maximizable for the current thread (open, un-maximize, open → maximized).
+  useEffect(() => {
+    if (!canMaximizeRightPanel || !rightPanelMaximizedPreference) return;
+    setMaximizedRightPanelThreadKey(routeThreadKey);
+  }, [canMaximizeRightPanel, rightPanelMaximizedPreference, routeThreadKey]);
 
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
@@ -6045,10 +6059,15 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadRef, threadPanelPresentation]);
   const toggleRightPanelMaximized = useCallback(() => {
     if (!canMaximizeRightPanel) return;
-    setMaximizedRightPanelThreadKey((threadKey) =>
-      threadKey === routeThreadKey ? null : routeThreadKey,
-    );
-  }, [canMaximizeRightPanel, routeThreadKey]);
+    const nextThreadKey = maximizedRightPanelThreadKey === routeThreadKey ? null : routeThreadKey;
+    setMaximizedRightPanelThreadKey(nextThreadKey);
+    setRightPanelMaximizedPreference(nextThreadKey !== null);
+  }, [
+    canMaximizeRightPanel,
+    maximizedRightPanelThreadKey,
+    routeThreadKey,
+    setRightPanelMaximizedPreference,
+  ]);
   const cleanupRightPanelSurfaces = useCallback(
     (surfaces: readonly RightPanelSurface[]) => {
       if (!activeThreadRef) return;
