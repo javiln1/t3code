@@ -30,7 +30,7 @@ import {
 } from "./browserDefaults";
 
 export const isBrowserPreviewFile = (path: string): boolean =>
-  /\.(?:html?|pdf)$/i.test(path.split(/[?#]/, 1)[0] ?? "");
+  /\.(?:html?|pdf|txt|md|json|csv|log)$/i.test(path.split(/[?#]/, 1)[0] ?? "");
 
 export class BrowserPreviewUnavailableError extends Data.TaggedError(
   "BrowserPreviewUnavailableError",
