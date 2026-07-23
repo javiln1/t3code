@@ -304,12 +304,15 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // flag must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarV2Status(thread);
-  const shouldRecede = status === "ready" && !isUnread && !props.isActive && !isSelected;
   // In-flight rows (working, or waiting on approval/input) fade as a whole:
   // there is nothing for the user to do yet, so prominence is reserved for
   // rows that need a human — done (unread), read-but-unsettled, and failed.
-  // The status label keeps its hue, so waiting rows stay findable.
+  // The status label keeps its hue, so waiting rows stay findable. In-flight
+  // rows recede the same as read-ready ones (inbox-zero: working threads
+  // aren't your problem yet) — only the colored status label stands out.
   const isInFlight = status === "working" || status === "approval" || status === "input";
+  const shouldRecede =
+    (status === "ready" || isInFlight) && !isUnread && !props.isActive && !isSelected;
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
@@ -524,10 +527,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               "truncate",
               isUnread
                 ? "text-foreground"
-                : status !== "ready"
-                  ? "text-foreground/95"
-                  : shouldRecede
-                    ? "text-muted-foreground/80"
+                : shouldRecede
+                  ? "text-muted-foreground/80"
+                  : status === "failed"
+                    ? "text-foreground/95"
                     : "text-foreground/90",
             )
           : cn(
@@ -671,7 +674,12 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 className="size-4 shrink-0"
               />
               {props.projectTitle ? (
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground/85">
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-xs text-muted-foreground/85",
+                    shouldRecede ? "font-normal" : "font-medium",
+                  )}
+                >
                   {props.projectTitle}
                 </span>
               ) : (
