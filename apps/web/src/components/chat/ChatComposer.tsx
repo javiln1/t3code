@@ -50,6 +50,8 @@ import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
 } from "./composerMentionDrag";
+import { COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME } from "../composerInlineChip";
+import { autoAnimate } from "@formkit/auto-animate";
 import {
   type ComposerImageAttachment,
   type DraftId,
@@ -76,7 +78,6 @@ import {
 import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
-import { resolveShortcutCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -221,6 +222,7 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -717,6 +719,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
   } = props;
   const isSendDisabled = sendDisabledReason !== null;
+
+  const sendNowShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "composer.sendNow"),
+    [keybindings],
+  );
+  const queuedMessagesListRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) autoAnimate(node, { duration: 150, easing: "ease-out" });
+  }, []);
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -1882,7 +1892,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }) => {
+    (event?: { preventDefault: () => void }, options?: { bypassQueue?: boolean }) => {
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
