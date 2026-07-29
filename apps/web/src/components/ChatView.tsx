@@ -6450,6 +6450,11 @@ function ChatViewContent(props: ChatViewProps) {
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}
                             onExpandImage={onExpandTimelineImage}
+                            queuedMessages={
+                              queuedMessagesByThreadKey[routeThreadKey] ?? EMPTY_QUEUED_MESSAGES
+                            }
+                            onRemoveQueuedMessage={removeQueuedMessage}
+                            onSendQueuedMessageNow={sendQueuedMessageNow}
                           />
                         </div>
                       </div>
