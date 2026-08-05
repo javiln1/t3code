@@ -4753,6 +4753,7 @@ function ChatViewContent(props: ChatViewProps) {
       annotation: PreviewAnnotationPayload;
       image: ComposerImageAttachment | null;
     },
+    options?: { bypassQueue?: boolean },
   ) => {
     e?.preventDefault();
     const notifyDirectAnnotationAttached = () => {
@@ -4911,7 +4912,7 @@ function ChatViewContent(props: ChatViewProps) {
     // their transient payloads are never parked client-side. The busy signal
     // is deliberately broad (running turn, unsettled turn, or a dispatch in
     // flight) so the moments just after sending still queue instead of
-    // steering or dropping. Shift+Enter arrives with bypassQueue to steer.
+    // steering or dropping. Cmd/Ctrl+Enter arrives with bypassQueue to steer.
     const hasNonTextPayload =
       composerImages.length > 0 ||
       sendableComposerTerminalContexts.length > 0 ||
@@ -6427,7 +6428,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerImagesRef={composerImagesRef}
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
-                            onSend={onSend}
+                            onSend={(event, sendOptions) => onSend(event, undefined, sendOptions)}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
