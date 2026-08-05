@@ -506,6 +506,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming
         ? ["Stream token by token"]
         : []),
+      ...(settings.notifyOnTurnComplete !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete
+        ? ["Response notifications"]
+        : []),
       ...(settings.enableProviderUpdateChecks !==
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
@@ -1837,6 +1840,34 @@ export function GeneralSettingsPanel() {
   const canResetBackgroundActivity = !Equal.equals(
     settings.backgroundActivity,
     DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
+  );
+
+  const handleResponseNotificationsChange = useCallback(
+    (checked: boolean) => {
+      if (!checked) {
+        updateSettings({ notifyOnTurnComplete: false });
+        return;
+      }
+
+      void requestResponseNotificationPermission().then((permission) => {
+        if (permission === "granted") {
+          updateSettings({ notifyOnTurnComplete: true });
+          return;
+        }
+
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: permission === "unsupported" ? "Notifications unavailable" : "Permission needed",
+            description:
+              permission === "unsupported"
+                ? "This browser does not support system notifications."
+                : "Allow notifications for T3 Code in your browser or system settings.",
+          }),
+        );
+      });
+    },
+    [updateSettings],
   );
 
   return (
