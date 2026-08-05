@@ -479,6 +479,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.notifyOnTurnComplete !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete
+        ? ["Response notifications"]
+        : []),
       ...(settings.enableProviderUpdateChecks !==
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
@@ -522,6 +525,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizeTerminal,
       settings.glassOpacity,
       settings.enableAssistantStreaming,
+      settings.notifyOnTurnComplete,
       settings.enableProviderUpdateChecks,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
@@ -602,6 +606,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      notifyOnTurnComplete: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
@@ -1557,6 +1562,34 @@ export function GeneralSettingsPanel() {
     DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
   );
 
+  const handleResponseNotificationsChange = useCallback(
+    (checked: boolean) => {
+      if (!checked) {
+        updateSettings({ notifyOnTurnComplete: false });
+        return;
+      }
+
+      void requestResponseNotificationPermission().then((permission) => {
+        if (permission === "granted") {
+          updateSettings({ notifyOnTurnComplete: true });
+          return;
+        }
+
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: permission === "unsupported" ? "Notifications unavailable" : "Permission needed",
+            description:
+              permission === "unsupported"
+                ? "This browser does not support system notifications."
+                : "Allow notifications for T3 Code in your browser or system settings.",
+          }),
+        );
+      });
+    },
+    [updateSettings],
+  );
+
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
@@ -1687,6 +1720,30 @@ export function GeneralSettingsPanel() {
                 updateSettings({ enableAssistantStreaming: Boolean(checked) })
               }
               aria-label="Stream assistant messages"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("response-notifications")}
+          description="Send a system notification when a response finishes while T3 Code is not focused."
+          resetAction={
+            settings.notifyOnTurnComplete !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete ? (
+              <SettingResetButton
+                label="response notifications"
+                onClick={() =>
+                  updateSettings({
+                    notifyOnTurnComplete: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notifyOnTurnComplete}
+              onCheckedChange={(checked) => handleResponseNotificationsChange(Boolean(checked))}
+              aria-label="Notify when responses finish"
             />
           }
         />
