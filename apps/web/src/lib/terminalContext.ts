@@ -1,6 +1,7 @@
 import { type ThreadId } from "@t3tools/contracts";
 
 import { extractTrailingElementContexts, type ParsedElementContextEntry } from "./elementContext";
+import { extractTrailingMessageQuotes, type ParsedMessageQuoteEntry } from "./messageQuoteContext";
 
 export interface TerminalContextSelection {
   terminalId: string;
@@ -35,6 +36,11 @@ export interface DisplayedUserMessageState {
    * leak into the user's bubble.
    */
   elementContexts: ParsedElementContextEntry[];
+  /**
+   * Quoted assistant spans pulled out of the trailing `<quoted_message>` block,
+   * so the bubble renders quote cards instead of raw markup.
+   */
+  messageQuotes: ParsedMessageQuoteEntry[];
 }
 
 export interface ParsedTerminalContextEntry {
@@ -247,9 +253,10 @@ export function extractTrailingTerminalContexts(prompt: string): ExtractedTermin
 
 export function deriveDisplayedUserMessageState(prompt: string): DisplayedUserMessageState {
   // Order matters: send-time appends `<terminal_context>` first, then
-  // `<element_context>` last. Strip element first so the (now-trailing)
-  // terminal block can be matched by `extractTrailingTerminalContexts`.
-  const extractedElement = extractTrailingElementContexts(prompt);
+  // `<element_context>`, and `<quoted_message>` last. Strip in reverse so each
+  // block is the trailing one by the time its extractor runs.
+  const extractedQuotes = extractTrailingMessageQuotes(prompt);
+  const extractedElement = extractTrailingElementContexts(extractedQuotes.promptText);
   const extractedTerminal = extractTrailingTerminalContexts(extractedElement.promptText);
   return {
     visibleText: extractedTerminal.promptText,
@@ -258,6 +265,7 @@ export function deriveDisplayedUserMessageState(prompt: string): DisplayedUserMe
     previewTitle: extractedTerminal.previewTitle,
     contexts: extractedTerminal.contexts,
     elementContexts: extractedElement.contexts,
+    messageQuotes: extractedQuotes.quotes,
   };
 }
 

@@ -87,8 +87,10 @@ import {
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
 import { type ElementContextDraft } from "../../lib/elementContext";
+import { type MessageQuoteDraft } from "../../lib/messageQuoteContext";
 import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
 import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
+import { ComposerPendingMessageQuotes } from "./ComposerPendingMessageQuotes";
 import { ComposerPreviewAnnotationCards } from "./ComposerPreviewAnnotationCards";
 import {
   shouldUseCompactComposerPrimaryActions,
@@ -229,8 +231,10 @@ import { toastManager } from "../ui/toast";
 import {
   ArrowUpIcon,
   BotIcon,
+  CheckIcon,
   CircleAlertIcon,
   ClockIcon,
+  PencilIcon,
   PencilRulerIcon,
   type LucideIcon,
   LockIcon,
@@ -512,6 +516,7 @@ export interface ChatComposerHandle {
     images: ComposerImageAttachment[];
     terminalContexts: TerminalContextDraft[];
     elementContexts: ElementContextDraft[];
+    messageQuotes: MessageQuoteDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
     reviewComments: ReviewCommentContext[];
     selectedPromptEffort: string | null;
@@ -642,6 +647,12 @@ export interface ChatComposerProps {
   queuedMessages: ReadonlyArray<QueuedComposerMessage>;
   onRemoveQueuedMessage: (id: string) => void;
   onSendQueuedMessageNow: (id: string) => void;
+  /** Commit an inline edit. Empty text removes the entry. */
+  onUpdateQueuedMessage: (id: string, text: string) => void;
+  /** Which chip is open for editing. Owned by ChatView: it holds the queue
+      drain while an edit is in progress. */
+  editingQueuedMessageId: string | null;
+  onEditingQueuedMessageIdChange: (id: string | null) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -655,6 +666,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     queuedMessages,
     onRemoveQueuedMessage,
     onSendQueuedMessageNow,
+    onUpdateQueuedMessage,
+    editingQueuedMessageId,
+    onEditingQueuedMessageIdChange,
     routeKind,
     routeThreadRef,
     draftId,
@@ -729,6 +743,35 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (node) autoAnimate(node, { duration: 150, easing: "ease-out" });
   }, []);
 
+  // In-progress text for the open queue chip edit. Local so keystrokes never
+  // re-render ChatView; only open/close crosses the boundary.
+  const [queuedEditDraft, setQueuedEditDraft] = useState("");
+
+  const beginQueuedMessageEdit = useCallback(
+    (queued: QueuedComposerMessage) => {
+      setQueuedEditDraft(queued.text);
+      onEditingQueuedMessageIdChange(queued.id);
+    },
+    [onEditingQueuedMessageIdChange],
+  );
+
+  const commitQueuedMessageEdit = useCallback(() => {
+    if (editingQueuedMessageId === null) return;
+    onUpdateQueuedMessage(editingQueuedMessageId, queuedEditDraft);
+    onEditingQueuedMessageIdChange(null);
+    setQueuedEditDraft("");
+  }, [
+    editingQueuedMessageId,
+    onEditingQueuedMessageIdChange,
+    onUpdateQueuedMessage,
+    queuedEditDraft,
+  ]);
+
+  const cancelQueuedMessageEdit = useCallback(() => {
+    onEditingQueuedMessageIdChange(null);
+    setQueuedEditDraft("");
+  }, [onEditingQueuedMessageIdChange]);
+
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
   // ------------------------------------------------------------------
@@ -739,6 +782,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerElementContexts = composerDraft.elementContexts;
   const composerPreviewAnnotations = composerDraft.previewAnnotations;
   const composerReviewComments = composerDraft.reviewComments;
+  const composerMessageQuotes = composerDraft.messageQuotes;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
@@ -762,6 +806,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const removeComposerDraftReviewComment = useComposerDraftStore(
     (store) => store.removeReviewComment,
+  );
+  const removeComposerDraftMessageQuote = useComposerDraftStore(
+    (store) => store.removeMessageQuote,
   );
   const clearComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.clearPersistedAttachments,
@@ -1975,6 +2022,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toggleInteractionMode();
       return true;
     }
+    // "Composer: Send Now" (default Cmd/Ctrl+Enter, rebindable in Settings →
+    // Keybindings) sends the current draft immediately. If queueing already
+    // cleared the composer, it sends the newest queued item instead.
+    //
+    // Checked BEFORE the trigger menu: a draft ending on an @path / $skill /
+    // /command token leaves the menu open, and letting it swallow the chord
+    // would silently queue the message the user asked to send now.
+    //
+    // Deliberately NOT gated on a local "is the agent busy" check. That gate
+    // used to duplicate ChatView's queue predicate and drifted from it (it
+    // missed an unsettled-but-not-running turn and the in-flight send ref),
+    // so the chord fell through to a plain send and got queued anyway —
+    // hence the infamous "press it twice". bypassQueue is a no-op when
+    // nothing is running, so ChatView stays the only place that decides.
+    if (
+      key === "Enter" &&
+      !isMobileViewport &&
+      resolveShortcutCommand(event, keybindings) === "composer.sendNow"
+    ) {
+      const action = resolveComposerSendNowAction({
+        hasSendableDraft: composerSendState.hasSendableContent,
+        queuedMessageCount: queuedMessages.length,
+      });
+      if (action === "draft") {
+        submitComposer(undefined, { bypassQueue: true });
+        return true;
+      }
+      if (action === "latest-queued") {
+        const latestQueued = queuedMessages[queuedMessages.length - 1];
+        if (latestQueued) {
+          onSendQueuedMessageNow(latestQueued.id);
+          return true;
+        }
+      }
+      // Nothing to send: fall through rather than swallow the key.
+    }
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive = composerMenuOpenRef.current || trigger !== null;
     if (menuIsActive) {
@@ -1992,27 +2075,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onSelectComposerItem(selectedItem);
         return true;
       }
-    }
-    // "Composer: Send Now" (default Cmd/Ctrl+Enter, rebindable in Settings →
-    // Keybindings) sends the current draft immediately. If queueing already
-    // cleared the composer, it sends the newest queued item instead.
-    if (
-      key === "Enter" &&
-      !isMobileViewport &&
-      (phase === "running" || isSendBusy) &&
-      resolveShortcutCommand(event, keybindings) === "composer.sendNow"
-    ) {
-      const action = resolveComposerSendNowAction({
-        hasSendableDraft: composerSendState.hasSendableContent,
-        queuedMessageCount: queuedMessages.length,
-      });
-      if (action === "draft") {
-        submitComposer(undefined, { bypassQueue: true });
-      } else if (action === "latest-queued") {
-        const latestQueued = queuedMessages[queuedMessages.length - 1];
-        if (latestQueued) onSendQueuedMessageNow(latestQueued.id);
-      }
-      return true;
     }
     if (
       key === "Enter" &&
@@ -2775,6 +2837,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         images: composerImagesRef.current,
         terminalContexts: composerTerminalContextsRef.current,
         elementContexts: composerElementContextsRef.current,
+        messageQuotes: composerMessageQuotes,
         previewAnnotations: composerPreviewAnnotations,
         reviewComments: composerReviewComments,
         selectedPromptEffort,

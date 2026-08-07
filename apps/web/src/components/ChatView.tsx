@@ -227,6 +227,7 @@ import {
   type ElementContextDraft,
   formatElementContextLabel,
 } from "../lib/elementContext";
+import { appendMessageQuotesToPrompt } from "../lib/messageQuoteContext";
 import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
 import { appendReviewCommentsToPrompt, type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
@@ -1378,6 +1379,11 @@ function ChatViewContent(props: ChatViewProps) {
   const [queuedMessagesByThreadKey, setQueuedMessagesByThreadKey] = useState<
     Record<string, QueuedComposerMessage[]>
   >({});
+  // Which queued chip is open for inline editing, or null. Only the identity
+  // lives here — the in-progress text stays local to the composer so typing
+  // doesn't re-render this tree. Held here because the drain effect below has
+  // to see it, and has to re-run the moment it clears.
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -5086,6 +5092,7 @@ function ChatViewContent(props: ChatViewProps) {
       images: sendContextImages,
       terminalContexts: composerTerminalContexts,
       elementContexts: composerElementContexts,
+      messageQuotes: composerMessageQuotes,
       previewAnnotations: sendContextPreviewAnnotations,
       reviewComments: composerReviewComments,
       selectedProvider: ctxSelectedProvider,
@@ -5128,6 +5135,7 @@ function ChatViewContent(props: ChatViewProps) {
         composerElementContexts.length +
         composerPreviewAnnotations.length +
         composerReviewComments.length,
+      messageQuoteCount: composerMessageQuotes.length,
     });
     if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
@@ -5161,7 +5169,8 @@ function ChatViewContent(props: ChatViewProps) {
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
-      composerReviewComments.length === 0
+      composerReviewComments.length === 0 &&
+      composerMessageQuotes.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
@@ -5206,12 +5215,16 @@ function ChatViewContent(props: ChatViewProps) {
     // is deliberately broad (running turn, unsettled turn, or a dispatch in
     // flight) so the moments just after sending still queue instead of
     // steering or dropping. Cmd/Ctrl+Enter arrives with bypassQueue to steer.
+    // Message quotes count as a non-text payload even though they serialize to
+    // text: the drain path (sendQueuedMessage) carries only `text`, so a queued
+    // quote would be silently dropped on the way out.
     const hasNonTextPayload =
       composerImages.length > 0 ||
       sendableComposerTerminalContexts.length > 0 ||
       composerElementContexts.length > 0 ||
       composerPreviewAnnotations.length > 0 ||
-      composerReviewComments.length > 0;
+      composerReviewComments.length > 0 ||
+      composerMessageQuotes.length > 0;
     // isLatestTurnSettled is false for threads with no turns at all — require
     // an actual turn before treating "unsettled" as busy, or first messages
     // would queue with nothing to drain them.
@@ -5889,6 +5902,40 @@ function ChatViewContent(props: ChatViewProps) {
     [routeThreadKey],
   );
 
+  // Commit an inline edit. Clearing the text is how you delete from the queue,
+  // and editing a failed entry clears the failure so the fixed-up message
+  // rejoins the drain instead of staying parked.
+  const updateQueuedMessage = useCallback(
+    (queuedId: string, text: string) => {
+      const trimmed = text.trim();
+      setQueuedMessagesByThreadKey((existing) => {
+        const queue = existing[routeThreadKey];
+        if (!queue?.some((queued) => queued.id === queuedId)) return existing;
+        return {
+          ...existing,
+          [routeThreadKey]:
+            trimmed === ""
+              ? queue.filter((queued) => queued.id !== queuedId)
+              : queue.map((queued) =>
+                  queued.id === queuedId ? { id: queued.id, text: trimmed } : queued,
+                ),
+        };
+      });
+    },
+    [routeThreadKey],
+  );
+
+  // The queue is held while an edit is open, so a stale id would freeze it
+  // forever. Drop the edit if its entry left the queue (sent, removed, cleared)
+  // or the route moved to another thread.
+  useEffect(() => {
+    if (editingQueuedMessageId === null) return;
+    const queue = queuedMessagesByThreadKey[routeThreadKey] ?? EMPTY_QUEUED_MESSAGES;
+    if (!queue.some((queued) => queued.id === editingQueuedMessageId)) {
+      setEditingQueuedMessageId(null);
+    }
+  }, [editingQueuedMessageId, queuedMessagesByThreadKey, routeThreadKey]);
+
   // Text-only direct send for queued messages: the existing-thread subset of
   // onSend (no bootstrap, no attachments), mirroring onSubmitPlanFollowUp.
   const sendQueuedMessage = useCallback(
@@ -6033,6 +6080,7 @@ function ChatViewContent(props: ChatViewProps) {
         isSendBusy,
         isConnecting,
         isSendInFlight: sendInFlightRef.current,
+        isEditingQueuedMessage: editingQueuedMessageId !== null,
       })
     ) {
       return;
@@ -6050,6 +6098,7 @@ function ChatViewContent(props: ChatViewProps) {
       }));
     });
   }, [
+    editingQueuedMessageId,
     isConnecting,
     isSendBusy,
     phase,
@@ -6832,6 +6881,9 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             onRemoveQueuedMessage={removeQueuedMessage}
                             onSendQueuedMessageNow={sendQueuedMessageNow}
+                            onUpdateQueuedMessage={updateQueuedMessage}
+                            editingQueuedMessageId={editingQueuedMessageId}
+                            onEditingQueuedMessageIdChange={setEditingQueuedMessageId}
                           />
                         </div>
                       </div>

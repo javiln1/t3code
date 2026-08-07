@@ -54,6 +54,7 @@ import {
   HammerIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
+  QuoteIcon,
   PaintbrushIcon,
   SearchIcon,
   SquarePenIcon,
@@ -105,6 +106,10 @@ import {
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
+import { useComposerDraftStore } from "~/composerDraftStore";
+import { readLocalApi } from "~/localApi";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import { clearDomSelection, readMessageQuoteSelection } from "./messageQuoteSelection";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 
@@ -1047,6 +1052,13 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
+        {displayedUserMessage.messageQuotes.length > 0 ? (
+          <div className="mb-2 flex flex-col gap-1.5">
+            {displayedUserMessage.messageQuotes.map((quote) => (
+              <UserMessageQuoteCard key={`${quote.header}:${quote.body}`} text={quote.body} />
+            ))}
+          </div>
+        ) : null}
         <CollapsibleUserMessageBody
           text={elementContextState.promptText}
           terminalContexts={terminalContexts}
@@ -1124,10 +1136,56 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const quoteContainerRef = useRef<HTMLDivElement | null>(null);
+  const addMessageQuote = useComposerDraftStore((store) => store.addMessageQuote);
+  // Bumped on every open so a menu that resolves after the selection changed
+  // (or after a second drag opened its own menu) is discarded instead of
+  // quoting text the user has already moved on from.
+  const quoteMenuRequestIdRef = useRef(0);
+  const quoteMenuOpenRef = useRef(false);
+  const threadRef = ctx.threadRef;
+
+  const showQuoteMenu = useCallback(() => {
+    if (quoteMenuOpenRef.current || threadRef === null) return;
+    const localApi = readLocalApi();
+    if (!localApi) return;
+    const read = readMessageQuoteSelection(quoteContainerRef.current, row.message.id);
+    if (!read) return;
+    const requestId = ++quoteMenuRequestIdRef.current;
+    quoteMenuOpenRef.current = true;
+    void localApi.contextMenu
+      .show(
+        [
+          { id: "add-to-chat", label: "Add to chat" },
+          { id: "copy", label: "Copy" },
+        ],
+        read.position,
+      )
+      .finally(() => {
+        quoteMenuOpenRef.current = false;
+      })
+      .then(async (clicked) => {
+        if (requestId !== quoteMenuRequestIdRef.current || clicked === null) return;
+        if (clicked === "add-to-chat") {
+          addMessageQuote(threadRef, read.selection);
+          clearDomSelection();
+          return;
+        }
+        await writeTextToClipboard(read.clipboardText, "message selection");
+      })
+      .catch(() => {
+        // A failed clipboard write or a dismissed menu is not worth a toast:
+        // the selection is still on screen and the user can simply retry.
+      });
+  }, [addMessageQuote, row.message.id, threadRef]);
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div
+        className="relative min-w-0 px-1 py-0.5"
+        ref={quoteContainerRef}
+        onMouseUp={showQuoteMenu}
+      >
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
@@ -1715,6 +1773,22 @@ const UserMessageElementContextChip = memo(function UserMessageElementContextChi
         {tooltipText}
       </TooltipPopup>
     </Tooltip>
+  );
+});
+
+/**
+ * A span of assistant prose the user quoted into this message. Rendered as a
+ * bordered block rather than a chip: unlike an element pick, the quote's whole
+ * point is the text itself, so hiding it behind a tooltip would defeat it.
+ */
+const UserMessageQuoteCard = memo(function UserMessageQuoteCard(props: { text: string }) {
+  return (
+    <div className="flex gap-2 rounded-md border border-border/60 bg-background/50 px-2 py-1.5">
+      <QuoteIcon className="mt-0.5 size-3 shrink-0 text-foreground/50" />
+      <span className="min-w-0 whitespace-pre-wrap wrap-break-word text-foreground/75 text-xs leading-snug">
+        {props.text}
+      </span>
+    </div>
   );
 });
 

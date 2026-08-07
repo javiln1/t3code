@@ -39,9 +39,16 @@ export function canDrainQueuedComposerMessage(input: {
   isSendBusy: boolean;
   isConnecting: boolean;
   isSendInFlight: boolean;
+  // An open inline edit holds the whole queue: draining mid-edit would send a
+  // half-typed message, and the edit the user was making would vanish with it.
+  isEditingQueuedMessage: boolean;
 }): boolean {
   return (
-    input.phase !== "running" && !input.isSendBusy && !input.isConnecting && !input.isSendInFlight
+    input.phase !== "running" &&
+    !input.isSendBusy &&
+    !input.isConnecting &&
+    !input.isSendInFlight &&
+    !input.isEditingQueuedMessage
   );
 }
 
@@ -305,6 +312,11 @@ export function deriveComposerSendState(options: {
    * contexts do: a prompt of just element chips is still a valid send.
    */
   elementContextCount?: number;
+  /**
+   * Quoted assistant spans. Same rule as element contexts: a draft of just
+   * quote chips ("what about this?") is a valid send on its own.
+   */
+  messageQuoteCount?: number;
 }): {
   trimmedPrompt: string;
   sendableTerminalContexts: TerminalContextDraft[];
@@ -316,6 +328,7 @@ export function deriveComposerSendState(options: {
   const expiredTerminalContextCount =
     options.terminalContexts.length - sendableTerminalContexts.length;
   const elementContextCount = options.elementContextCount ?? 0;
+  const messageQuoteCount = options.messageQuoteCount ?? 0;
   return {
     trimmedPrompt,
     sendableTerminalContexts,
@@ -324,7 +337,8 @@ export function deriveComposerSendState(options: {
       trimmedPrompt.length > 0 ||
       options.imageCount > 0 ||
       sendableTerminalContexts.length > 0 ||
-      elementContextCount > 0,
+      elementContextCount > 0 ||
+      messageQuoteCount > 0,
   };
 }
 
