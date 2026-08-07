@@ -5,7 +5,11 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { canSettle, canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  canSnooze,
+  resolveSettleBlocker,
+  threadWokeAt,
+} from "@t3tools/client-runtime/state/thread-settled";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
@@ -68,10 +72,22 @@ export class ThreadSettleBlockedError extends Schema.TaggedErrorClass<ThreadSett
   {
     environmentId: EnvironmentId,
     threadId: ThreadId,
+    blocker: Schema.Literals(["pending-request", "active-session", "queued-turn-start"]),
   },
 ) {
+  // Say which blocker fired. The old copy told everyone to "resolve or
+  // interrupt", which is a dead end for a queued turn start: there is nothing
+  // running to interrupt and nothing pending to resolve, and the thread looks
+  // idle because that blocker has no status indicator at all.
   override get message(): string {
-    return "This thread still needs attention. Resolve or interrupt it first, then try again.";
+    switch (this.blocker) {
+      case "pending-request":
+        return "This thread is waiting on you. Answer the approval or input request, then settle it.";
+      case "active-session":
+        return "This thread's session is still live. Interrupt it, then settle it.";
+      case "queued-turn-start":
+        return "A just-sent message hasn't been picked up yet. Give it a moment, then settle it.";
+    }
   }
 }
 
@@ -486,12 +502,16 @@ export function useThreadActions() {
       // Settle may only target what effectiveSettled could classify as
       // settled: not starting/running sessions, not threads waiting on
       // approvals or user input. Anything else would hide live work.
-      if (resolved && !canSettle(resolved.thread, { now: new Date().toISOString() })) {
+      const settleBlocker = resolved
+        ? resolveSettleBlocker(resolved.thread, { now: new Date().toISOString() })
+        : null;
+      if (resolved && settleBlocker !== null) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadSettleBlockedError({
               environmentId: resolved.threadRef.environmentId,
               threadId: resolved.threadRef.threadId,
+              blocker: settleBlocker,
             }),
           ),
         );

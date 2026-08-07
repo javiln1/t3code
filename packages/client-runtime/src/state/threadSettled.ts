@@ -138,6 +138,36 @@ export function hasQueuedTurnStart(
 }
 
 /**
+ * Which blocker holds a thread active, or null when it may be settled.
+ *
+ * Named rather than boolean because the three blockers are not equally
+ * legible: a pending request and a live session both paint the row (blocked
+ * badge, "Working"/"Connecting" with a pulsing dot), but a queued turn start
+ * has NO indicator anywhere — the thread reads as completely idle and still
+ * refuses to settle, then quietly starts working two minutes later when the
+ * grace window lapses. Callers surface this so the user is told which one it
+ * is instead of a generic "still needs attention".
+ */
+export type ThreadSettleBlocker = "pending-request" | "active-session" | "queued-turn-start";
+
+export function resolveSettleBlocker(
+  shell: Pick<
+    OrchestrationThreadShell,
+    "hasPendingApprovals" | "hasPendingUserInput" | "session" | "latestUserMessageAt" | "latestTurn"
+  >,
+  options: { readonly now: string },
+): ThreadSettleBlocker | null {
+  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return "pending-request";
+  if (shell.session?.status === "starting" || shell.session?.status === "running") {
+    return "active-session";
+  }
+  // Queued work is as blocked-on-progress as a live session: settling it
+  // (or auto-settling it on a closed PR) would hide a just-requested turn.
+  if (hasQueuedTurnStart(shell, options)) return "queued-turn-start";
+  return null;
+}
+
+/**
  * A thread may be settled only when none of effectiveSettled's activity
  * blockers hold. This is deliberately the same list: anything the partition
  * refuses to CLASSIFY as settled must also be refused as a settle TARGET.
@@ -151,12 +181,7 @@ export function canSettle(
   >,
   options: { readonly now: string },
 ): boolean {
-  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false;
-  if (shell.session?.status === "starting" || shell.session?.status === "running") return false;
-  // Queued work is as blocked-on-progress as a live session: settling it
-  // (or auto-settling it on a closed PR) would hide a just-requested turn.
-  if (hasQueuedTurnStart(shell, options)) return false;
-  return true;
+  return resolveSettleBlocker(shell, options) === null;
 }
 
 /**

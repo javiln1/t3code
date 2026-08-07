@@ -12,6 +12,7 @@ import {
   changeRequestAutoSettles,
   effectiveSettled,
   hasQueuedTurnStart,
+  resolveSettleBlocker,
   threadLastActivityAt,
   type ChangeRequestStateLike,
 } from "./threadSettled.ts";
@@ -537,6 +538,46 @@ describe("canSettle", () => {
     ).toBe(false);
     // Past the window the message is a failed/stale start: settleable again.
     expect(canSettle(queued, { now: NOW })).toBe(true);
+  });
+
+  it("names which blocker holds the thread", () => {
+    expect(resolveSettleBlocker(makeShell({ activityAt: FRESH }), { now: NOW })).toBe(null);
+    expect(
+      resolveSettleBlocker(makeShell({ activityAt: FRESH, pending: "approval" }), { now: NOW }),
+    ).toBe("pending-request");
+    expect(
+      resolveSettleBlocker(makeShell({ activityAt: FRESH, pending: "user-input" }), { now: NOW }),
+    ).toBe("pending-request");
+    expect(
+      resolveSettleBlocker(makeShell({ activityAt: FRESH, sessionStatus: "starting" }), {
+        now: NOW,
+      }),
+    ).toBe("active-session");
+    expect(
+      resolveSettleBlocker(makeShell({ activityAt: FRESH, sessionStatus: "running" }), {
+        now: NOW,
+      }),
+    ).toBe("active-session");
+    // The invisible one: no status indicator anywhere, so this is the blocker
+    // whose name the user actually needs to be told.
+    const queued = {
+      ...makeShell({ activityAt: FRESH }),
+      latestUserMessageAt: "2026-04-09T12:00:00.000Z",
+    };
+    expect(resolveSettleBlocker(queued, { now: "2026-04-09T12:00:30.000Z" })).toBe(
+      "queued-turn-start",
+    );
+  });
+
+  // A pending request outranks the rest: it is the one the user can act on.
+  it("reports the most actionable blocker when several hold at once", () => {
+    const blockedEveryWay = {
+      ...makeShell({ activityAt: FRESH, pending: "approval", sessionStatus: "running" }),
+      latestUserMessageAt: "2026-04-09T12:00:00.000Z",
+    };
+    expect(resolveSettleBlocker(blockedEveryWay, { now: "2026-04-09T12:00:30.000Z" })).toBe(
+      "pending-request",
+    );
   });
 
   it("lets a server-accepted settle overrule the clock-derived queued blocker", () => {
