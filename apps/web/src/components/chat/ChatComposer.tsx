@@ -203,6 +203,7 @@ import {
   ArrowUpIcon,
   BotIcon,
   CircleAlertIcon,
+  ClockIcon,
   PencilRulerIcon,
   type LucideIcon,
   LockIcon,
