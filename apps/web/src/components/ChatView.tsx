@@ -5046,13 +5046,7 @@ function ChatViewContent(props: ChatViewProps) {
         }),
       );
     };
-    if (
-      !activeThread ||
-      isSendBusy ||
-      isConnecting ||
-      threadDetailLoading ||
-      sendInFlightRef.current
-    ) {
+    if (!activeThread || isConnecting || threadDetailLoading) {
       notifyDirectAnnotationAttached();
       return;
     }
@@ -5064,6 +5058,15 @@ function ChatViewContent(props: ChatViewProps) {
           description: "Reconnecting to the environment. Try again once it is connected.",
         }),
       );
+      return;
+    }
+    // Busy dispatch no longer drops text-only sends outright: they fall
+    // through to the queue gate below. Direct annotations retain the
+    // upstream behavior of staying attached to the draft until sending is
+    // available again.
+    const sendBusyNow = isSendBusy || sendInFlightRef.current;
+    if (sendBusyNow && directAnnotation) {
+      notifyDirectAnnotationAttached();
       return;
     }
     if (activePendingProgress) {
