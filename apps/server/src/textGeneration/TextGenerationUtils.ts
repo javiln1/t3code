@@ -63,6 +63,34 @@ export function sanitizeThreadTitle(raw: string): string {
   return `${normalized.slice(0, 47).trimEnd()}...`;
 }
 
+/**
+ * Normalise a raw turn recap to a single plain-prose line.
+ *
+ * Models reach for markdown even when told not to, so leading bullets and
+ * emphasis are stripped rather than trusted away. Returns an empty string when
+ * nothing usable survives; callers skip the recap entirely in that case rather
+ * than showing an empty row.
+ */
+export function sanitizeTurnRecap(raw: string): string {
+  const normalized = raw
+    .trim()
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .trim();
+
+  if (normalized.length === 0) {
+    return "";
+  }
+
+  if (normalized.length <= 400) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 397).trimEnd()}...`;
+}
+
 /** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */
 function cliLabel(cliName: string): string {
   const capitalized = cliName.charAt(0).toUpperCase() + cliName.slice(1);

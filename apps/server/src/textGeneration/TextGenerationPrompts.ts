@@ -316,3 +316,34 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+// ---------------------------------------------------------------------------
+// Turn recap
+// ---------------------------------------------------------------------------
+
+export interface TurnRecapPromptInput {
+  /** Flattened transcript of a single agent turn. */
+  turnTranscript: string;
+}
+
+const TURN_RECAP_PROMPT = [
+  "You write a one-line recap of what a coding agent just did, for the person who asked it.",
+  "Return a JSON object with keys: recap.",
+  "Rules:",
+  "- one or two sentences, 40 words maximum",
+  "- plain prose in past tense: no markdown, no bullets, no headings, no first-person pronouns",
+  "- lead with the outcome, not the steps taken to reach it",
+  "- name anything the person still has to do, anything that failed, and anything left unfinished",
+  "- prefer concrete nouns from the transcript (files, commands, errors) over vague summary words",
+  "- describe only what the transcript shows; never claim a result that was not observed",
+  "- if the turn only answered a question or changed nothing, say that plainly",
+].join("\n");
+
+export function buildTurnRecapPrompt(input: TurnRecapPromptInput) {
+  const prompt = `${TURN_RECAP_PROMPT}\n\nTurn transcript:\n${preserveMessageEnd(input.turnTranscript)}`;
+  const outputSchema = Schema.Struct({
+    recap: Schema.String,
+  });
+
+  return { prompt, outputSchema };
+}

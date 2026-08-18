@@ -539,6 +539,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
+      ...(settings.enableTurnRecaps !== DEFAULT_UNIFIED_SETTINGS.enableTurnRecaps
+        ? ["Turn recaps"]
+        : []),
     ],
     [
       isTextGenerationModelDirty,
@@ -548,6 +551,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserDefaultAppearance,
       settings.browserAutoShowFloatingPreview,
       settings.enableAgentBrowserAccess,
+      settings.enableTurnRecaps,
       settings.confirmQuit,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -680,6 +684,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
+      enableTurnRecaps: DEFAULT_UNIFIED_SETTINGS.enableTurnRecaps,
     });
     onRestored?.();
   }, [
@@ -2042,6 +2047,30 @@ export function GeneralSettingsPanel() {
                 updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
               }
               aria-label="Hide whitespace changes by default"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("turn-recaps")}
+          description="After each turn, add a one-line plain-English recap of what the agent did."
+          resetAction={
+            settings.enableTurnRecaps !== DEFAULT_UNIFIED_SETTINGS.enableTurnRecaps ? (
+              <SettingResetButton
+                label="turn recaps"
+                onClick={() =>
+                  updateSettings({
+                    enableTurnRecaps: DEFAULT_UNIFIED_SETTINGS.enableTurnRecaps,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.enableTurnRecaps}
+              onCheckedChange={(checked) => updateSettings({ enableTurnRecaps: Boolean(checked) })}
+              aria-label="Show turn recaps"
             />
           }
         />

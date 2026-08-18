@@ -295,6 +295,10 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateTurnRecap: () =>
+      Effect.succeed({
+        recap: "Updated the workflow.",
+      }),
     ...overrides,
   };
 
@@ -338,6 +342,17 @@ function createTextGeneration(
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    generateTurnRecap: (input) =>
+      implementation.generateTurnRecap(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generateTurnRecap",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),

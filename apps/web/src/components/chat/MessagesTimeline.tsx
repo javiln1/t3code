@@ -972,6 +972,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "turn-plan" ? <TurnPlanTimelineRow row={row} /> : null}
+      {row.kind === "recap" ? <RecapTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
     </div>
   );
@@ -1355,6 +1356,22 @@ const TurnPlanTimelineRow = memo(function TurnPlanTimelineRow({
     </div>
   );
 });
+
+/**
+ * Per-turn recap: one muted line under a finished turn saying what happened, in
+ * plain English. Deliberately unadorned — no card, no icon button, nothing to
+ * click — so it reads as a margin note rather than another piece of chrome.
+ */
+function RecapTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "recap" }> }) {
+  return (
+    <div className="py-1 pl-1.5">
+      <p className="text-[12.5px] italic leading-relaxed text-muted-foreground/80">
+        <span className="not-italic text-muted-foreground/60">※ recap: </span>
+        {row.text}
+      </p>
+    </div>
+  );
+}
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   const { workingStepLabel } = use(TimelineRowActivityCtx);

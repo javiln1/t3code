@@ -73,6 +73,18 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface TurnRecapGenerationInput {
+  cwd: string;
+  /** Flattened transcript of the turn being recapped. */
+  turnTranscript: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface TurnRecapGenerationResult {
+  recap: string;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -80,6 +92,7 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  generateTurnRecap(input: TurnRecapGenerationInput): Promise<TurnRecapGenerationResult>;
 }
 
 /**
@@ -113,6 +126,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Generate a short plain-English recap of a completed agent turn. */
+    readonly generateTurnRecap: (
+      input: TurnRecapGenerationInput,
+    ) => Effect.Effect<TurnRecapGenerationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -123,7 +141,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateTurnRecap";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -162,6 +181,10 @@ export const makeTextGenerationFromRegistry = (
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    generateTurnRecap: (input) =>
+      resolveInstance(registry, "generateTurnRecap", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateTurnRecap(input)),
       ),
   });
 

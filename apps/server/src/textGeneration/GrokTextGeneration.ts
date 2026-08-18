@@ -17,11 +17,13 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildTurnRecapPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
+  sanitizeTurnRecap,
 } from "./TextGenerationUtils.ts";
 import {
   applyGrokAcpModelSelection,
@@ -52,7 +54,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateTurnRecap";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -251,10 +254,30 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateTurnRecap: TextGeneration.TextGeneration["Service"]["generateTurnRecap"] =
+    Effect.fn("GrokTextGeneration.generateTurnRecap")(function* (input) {
+      const { prompt, outputSchema } = buildTurnRecapPrompt({
+        turnTranscript: input.turnTranscript,
+      });
+
+      const generated = yield* runGrokJson({
+        operation: "generateTurnRecap",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return {
+        recap: sanitizeTurnRecap(generated.recap),
+      } satisfies TextGeneration.TurnRecapGenerationResult;
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateTurnRecap,
   } satisfies TextGeneration.TextGeneration["Service"];
 });
