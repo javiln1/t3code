@@ -88,7 +88,6 @@ import {
   derivePendingUserInputs,
   derivePhase,
   deriveTimelineEntries,
-  deriveTurnRecapEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
   deriveTurnPlans,
@@ -2264,7 +2263,6 @@ function ChatViewContent(props: ChatViewProps) {
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
-  const turnRecaps = useMemo(() => deriveTurnRecapEntries(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, live strip, and workflow cards. v2Projection is null
   // until orchestration-v2 lands (source precedence lives in the derive).
@@ -2621,9 +2619,8 @@ function ChatViewContent(props: ChatViewProps) {
         activeThread?.proposedPlans ?? [],
         workLogEntries,
         turnPlans,
-        turnRecaps,
       ),
-    [activeThread?.proposedPlans, timelineMessages, turnPlans, turnRecaps, workLogEntries],
+    [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries],
   );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =

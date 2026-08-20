@@ -54,9 +54,6 @@ export const PROVIDER_OPTIONS: Array<{
   },
 ];
 
-/** Activity kind the server uses for per-turn recaps. */
-export const TURN_RECAP_ACTIVITY_KIND = "turn.recap";
-
 export type WorkLogToolLifecycleStatus =
   | "inProgress"
   | "completed"
@@ -144,36 +141,6 @@ export interface LatestProposedPlanState {
   implementationThreadId: ThreadId | null;
 }
 
-/**
- * A server-generated plain-English recap of one finished turn. Recaps arrive as
- * `turn.recap` thread activities; they are pulled out of the work log so they
- * render as their own timeline row instead of a tool-ish work entry.
- */
-export interface TurnRecapEntry {
-  id: string;
-  createdAt: string;
-  turnId: TurnId | null;
-  text: string;
-}
-
-export function deriveTurnRecapEntries(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-): TurnRecapEntry[] {
-  const recaps: TurnRecapEntry[] = [];
-  for (const activity of activities) {
-    if (activity.kind !== TURN_RECAP_ACTIVITY_KIND) continue;
-    const text = activity.summary.trim();
-    if (text.length === 0) continue;
-    recaps.push({
-      id: activity.id,
-      createdAt: activity.createdAt,
-      turnId: activity.turnId,
-      text,
-    });
-  }
-  return recaps;
-}
-
 export type TimelineEntry =
   | {
       id: string;
@@ -198,12 +165,6 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
-    }
-  | {
-      id: string;
-      kind: "recap";
-      createdAt: string;
-      recap: TurnRecapEntry;
     };
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
@@ -888,7 +849,6 @@ export function deriveWorkLogEntries(
     if (activity.kind === "task.updated") continue;
     if (activity.kind === "tool.progress") continue;
     if (activity.kind === "context-window.updated") continue;
-    if (activity.kind === TURN_RECAP_ACTIVITY_KIND) continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
@@ -1831,7 +1791,6 @@ export function deriveTimelineEntries(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
   turnPlans: ReadonlyArray<TurnPlanEntry> = [],
-  turnRecaps: ReadonlyArray<TurnRecapEntry> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1857,14 +1816,8 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  const recapRows: TimelineEntry[] = turnRecaps.map((recap) => ({
-    id: recap.id,
-    kind: "recap",
-    createdAt: recap.createdAt,
-    recap,
-  }));
-  return [...messageRows, ...proposedPlanRows, ...turnPlanRows, ...workRows, ...recapRows].toSorted(
-    (a, b) => a.createdAt.localeCompare(b.createdAt),
+  return [...messageRows, ...proposedPlanRows, ...turnPlanRows, ...workRows].toSorted((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
   );
 }
 

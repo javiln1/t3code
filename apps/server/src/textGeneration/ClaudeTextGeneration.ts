@@ -24,14 +24,12 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
-  buildTurnRecapPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
-  sanitizeTurnRecap,
   toJsonSchemaObject,
 } from "./TextGenerationUtils.ts";
 import {
@@ -87,8 +85,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle"
-      | "generateTurnRecap",
+      | "generateThreadTitle",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -118,8 +115,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle"
-      | "generateTurnRecap";
+      | "generateThreadTitle";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -363,30 +359,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
-  const generateTurnRecap: TextGeneration.TextGeneration["Service"]["generateTurnRecap"] =
-    Effect.fn("ClaudeTextGeneration.generateTurnRecap")(function* (input) {
-      const { prompt, outputSchema } = buildTurnRecapPrompt({
-        turnTranscript: input.turnTranscript,
-      });
-
-      const generated = yield* runClaudeJson({
-        operation: "generateTurnRecap",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        recap: sanitizeTurnRecap(generated.recap),
-      };
-    });
-
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-    generateTurnRecap,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

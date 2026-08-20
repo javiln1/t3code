@@ -131,11 +131,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
-    id: "turn-recaps",
-    title: "Turn recaps",
-    to: "/settings/general",
-  },
-  {
     id: "new-threads",
     title: "New threads",
     to: "/settings/general",

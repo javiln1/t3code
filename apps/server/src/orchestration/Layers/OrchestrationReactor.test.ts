@@ -9,7 +9,6 @@ import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
-import { TurnRecapReactor } from "../Services/TurnRecapReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
@@ -24,7 +23,7 @@ describe("OrchestrationReactor", () => {
     runtime = null;
   });
 
-  it("starts provider ingestion, provider command, checkpoint, thread deletion, and turn recap reactors", async () => {
+  it("starts provider ingestion, provider command, checkpoint, and thread deletion reactors", async () => {
     const started: string[] = [];
 
     runtime = ManagedRuntime.make(
@@ -66,15 +65,6 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
-          Layer.succeed(TurnRecapReactor, {
-            start: () => {
-              started.push("turn-recap-reactor");
-              return Effect.void;
-            },
-            drain: Effect.void,
-          }),
-        ),
-        Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
             start: () => {
@@ -95,7 +85,6 @@ describe("OrchestrationReactor", () => {
       "provider-command-reactor",
       "checkpoint-reactor",
       "thread-deletion-reactor",
-      "turn-recap-reactor",
       "agent-awareness-relay",
     ]);
 

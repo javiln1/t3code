@@ -607,15 +607,6 @@ export const ServerSettings = Schema.Struct({
    * between a desktop window and a phone attached to the same server.
    */
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  /**
-   * Whether a short plain-English recap is generated after each agent turn and
-   * appended to the thread timeline.
-   *
-   * Server-authoritative for the same reason as `enableAgentBrowserAccess`:
-   * generation happens on the server and the resulting recap is persisted for
-   * every attached client, so a per-device answer would be meaningless.
-   */
-  enableTurnRecaps: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
   // consumers should resolve `backgroundActivity` instead.
@@ -824,7 +815,6 @@ export const ServerSettingsPatch = Schema.Struct({
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
-  enableTurnRecaps: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

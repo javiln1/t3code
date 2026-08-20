@@ -240,12 +240,6 @@ export type MessagesTimelineRow =
       turnPlan: TurnPlanEntry;
     }
   | {
-      kind: "recap";
-      id: string;
-      createdAt: string;
-      text: string;
-    }
-  | {
       kind: "working";
       id: string;
       createdAt: string | null;
@@ -830,16 +824,6 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (timelineEntry.kind === "recap") {
-      nextRows.push({
-        kind: "recap",
-        id: timelineEntry.id,
-        createdAt: timelineEntry.createdAt,
-        text: timelineEntry.recap.text,
-      });
-      continue;
-    }
-
     if (timelineEntry.kind === "work") {
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
@@ -1083,11 +1067,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "turn-fold": {
       const bf = b as typeof a;
       return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
-    }
-
-    case "recap": {
-      const br = b as typeof a;
-      return a.createdAt === br.createdAt && a.text === br.text;
     }
 
     case "proposed-plan":
