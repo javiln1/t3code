@@ -45,7 +45,12 @@ import {
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
-import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import {
+  deriveComposerSendState,
+  readFileAsDataUrl,
+  type QueuedComposerMessage,
+} from "../ChatView.logic";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
