@@ -2279,6 +2279,30 @@ export function GeneralSettingsPanel() {
           }
         />
         <SettingsRow
+          {...searchableSetting("response-notifications")}
+          description="Show a system notification when a response finishes while T3 Code is in the background."
+          resetAction={
+            settings.notifyOnTurnComplete !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete ? (
+              <SettingResetButton
+                label="response notifications"
+                onClick={() =>
+                  updateSettings({
+                    notifyOnTurnComplete: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnComplete,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notifyOnTurnComplete}
+              onCheckedChange={(checked) => handleResponseNotificationsChange(Boolean(checked))}
+              aria-label="Response notifications"
+            />
+          }
+        />
+
+        <SettingsRow
           {...searchableSetting("hide-whitespace-changes")}
           description="Set whether the diff panel ignores whitespace-only edits by default."
           resetAction={
