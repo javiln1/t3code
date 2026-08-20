@@ -13,7 +13,6 @@ import {
   migrateLegacyTerminalContextPlaceholders,
   type TerminalContextDraft,
 } from "./terminalContext";
-
 function makeContext(overrides?: Partial<TerminalContextDraft>): TerminalContextDraft {
   return {
     id: "context-1",

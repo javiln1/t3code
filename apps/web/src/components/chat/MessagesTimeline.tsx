@@ -131,6 +131,7 @@ import {
   type LucideIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
+  QuoteIcon,
   PaintbrushIcon,
   MinusIcon,
   Redo2Icon,
@@ -242,6 +243,7 @@ import {
   reviewCommentContextLabel,
   selectedMessageContextFragment,
 } from "~/lib/composerContextRecords";
+import { extractTrailingMessageQuotes } from "~/lib/messageQuoteContext";
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
@@ -2046,6 +2048,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
   const userMessage = resolveUserMessagePresentation(row.message);
   const resolvedContext = useMemo(() => resolveUserMessageContext(row.message), [row.message]);
+  const displayedMessage = useMemo(
+    () => extractTrailingMessageQuotes(resolvedContext.text),
+    [resolvedContext.text],
+  );
   const previewImages = useMemo(
     () => userImages.filter((image) => image.name.startsWith("preview-annotation-")),
     [userImages],
@@ -2313,8 +2319,15 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         ) : null}
         <div onCopyCapture={onBodyCopyCapture}>
+          {displayedMessage.quotes.length > 0 ? (
+            <div className="mb-2 flex flex-col gap-1.5">
+              {displayedMessage.quotes.map((quote) => (
+                <UserMessageQuoteCard key={`${quote.header}:${quote.body}`} text={quote.body} />
+              ))}
+            </div>
+          ) : null}
           <CollapsibleUserMessageBody
-            text={resolvedContext.text}
+            text={displayedMessage.promptText}
             renderContextReference={renderContextReference}
             skills={ctx.skills}
             markdownCwd={ctx.markdownCwd}
@@ -3993,6 +4006,18 @@ function UserMessageMentionChip(props: {
     </Tooltip>
   );
 }
+
+/** A quoted assistant span stays visible beside the user's follow-up. */
+const UserMessageQuoteCard = memo(function UserMessageQuoteCard(props: { text: string }) {
+  return (
+    <div className="flex gap-2 rounded-md border border-border/60 bg-background/50 px-2 py-1.5">
+      <QuoteIcon className="mt-0.5 size-3 shrink-0 text-foreground/50" />
+      <span className="min-w-0 whitespace-pre-wrap wrap-break-word text-foreground/75 text-xs leading-snug">
+        {props.text}
+      </span>
+    </div>
+  );
+});
 
 function UserMessageContextChip(props: {
   icon: ReactNode;

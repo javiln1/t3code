@@ -21,6 +21,7 @@ import {
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
 } from "./ChatView.logic";
+import { appendMessageQuotesToPrompt } from "../lib/messageQuoteContext";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -1818,6 +1819,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const setComposerDraftReviewComments = useComposerDraftStore((store) => store.setReviewComments);
   const setComposerDraftThreadContexts = useComposerDraftStore((store) => store.setThreadContexts);
+  const setComposerDraftMessageQuotes = useComposerDraftStore((store) => store.setMessageQuotes);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
@@ -8787,6 +8789,7 @@ export default function ChatView(props: ChatViewProps) {
       images: sendContextImages,
       files: composerFiles,
       terminalContexts: composerTerminalContexts,
+      messageQuotes: composerMessageQuotes = [],
       previewAnnotations: sendContextPreviewAnnotations,
       reviewComments: composerReviewComments,
       threadContexts: composerThreadContexts,
@@ -8976,6 +8979,7 @@ export default function ChatView(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length +
         composerThreadContexts.length,
+      messageQuoteCount: composerMessageQuotes.length,
     });
     const feedbackCommand =
       ctxSelectedProvider === "codex" &&
@@ -8984,7 +8988,8 @@ export default function ChatView(props: ChatViewProps) {
       sendableComposerTerminalContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
       composerReviewComments.length === 0 &&
-      composerThreadContexts.length === 0
+      composerThreadContexts.length === 0 &&
+      composerMessageQuotes.length === 0
         ? parseCodexFeedbackCommand(trimmed)
         : null;
     if (feedbackCommand && multipleModelSelections === null) {
@@ -9114,7 +9119,8 @@ export default function ChatView(props: ChatViewProps) {
       sendableComposerTerminalContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
       composerReviewComments.length === 0 &&
-      composerThreadContexts.length === 0
+      composerThreadContexts.length === 0 &&
+      composerMessageQuotes.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand && multipleModelSelections === null) {
@@ -9173,8 +9179,9 @@ export default function ChatView(props: ChatViewProps) {
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
     const composerThreadContextsSnapshot = [...composerThreadContexts];
+    const composerMessageQuotesSnapshot = [...composerMessageQuotes];
     // Expired terminal excerpts are not sent; their chips leave the text with them.
-    const messageTextForSend = composerTerminalContexts
+    const messageTextWithoutQuotes = composerTerminalContexts
       .filter((context) => !composerTerminalContextsSnapshot.includes(context))
       .reduce(
         (text, context) =>
@@ -9182,6 +9189,10 @@ export default function ChatView(props: ChatViewProps) {
         promptForSend,
       )
       .trim();
+    const messageTextForSend = appendMessageQuotesToPrompt(
+      messageTextWithoutQuotes,
+      composerMessageQuotesSnapshot,
+    );
     // Records bind attachments by the id each side knows: the local id for the optimistic
     // row, the upload id (or local id on the data-URL path) on the wire; the server
     // rebinds them to the persisted id.
@@ -9997,21 +10008,25 @@ export default function ChatView(props: ChatViewProps) {
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
         });
-        promptRef.current = messageTextForSend;
+        promptRef.current = messageTextWithoutQuotes;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
         composerImagesRef.current = retryComposerImages;
         composerFilesRef.current = composerFilesSnapshot;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
-        setComposerDraftPrompt(composerDraftTarget, messageTextForSend);
+        setComposerDraftPrompt(composerDraftTarget, messageTextWithoutQuotes);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         addComposerDraftFiles(composerDraftTarget, composerFilesSnapshot);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotationsSnapshot);
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
         setComposerDraftThreadContexts(composerDraftTarget, composerThreadContextsSnapshot);
+        setComposerDraftMessageQuotes(composerDraftTarget, composerMessageQuotesSnapshot);
         composerRef.current?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(messageTextForSend, messageTextForSend.length),
-          prompt: messageTextForSend,
+          cursor: collapseExpandedComposerCursor(
+            messageTextWithoutQuotes,
+            messageTextWithoutQuotes.length,
+          ),
+          prompt: messageTextWithoutQuotes,
           detectTrigger: true,
         });
       }

@@ -1,3 +1,5 @@
+import { type MessageQuoteDraft } from "../../lib/messageQuoteContext";
+import { ComposerPendingMessageQuotes } from "./ComposerPendingMessageQuotes";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -1483,6 +1485,7 @@ export interface ChatComposerHandle {
     images: ComposerImageAttachment[];
     files: ComposerFileAttachment[];
     terminalContexts: TerminalContextDraft[];
+    messageQuotes: MessageQuoteDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
     reviewComments: ReviewCommentContext[];
     threadContexts: ThreadContextRecord[];
@@ -1878,6 +1881,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
     return composerImages.filter((image) => !previewAnnotationIds.has(image.id));
   }, [composerImages, composerPreviewAnnotations]);
+  const composerMessageQuotes = composerDraft.messageQuotes;
   const nonPersistedComposerImageIds = attachmentDraft.nonPersistedImageIds;
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const openPrLink = useOpenPrLink(routeThreadRef);
@@ -1986,6 +1990,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const removeComposerDraftReviewComment = useComposerDraftStore(
     (store) => store.removeReviewComment,
+  );
+  const removeComposerDraftMessageQuote = useComposerDraftStore(
+    (store) => store.removeMessageQuote,
   );
   const clearComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.clearPersistedAttachments,
@@ -6475,6 +6482,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         images: composerImagesRef.current,
         files: composerFilesRef.current,
         terminalContexts: composerTerminalContextsRef.current,
+        messageQuotes: composerMessageQuotes,
         previewAnnotations: composerPreviewAnnotations,
         reviewComments: composerReviewComments,
         threadContexts: composerThreadContexts,
@@ -6995,6 +7003,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </div>
                     ))}
                   </div>
+                )}
+
+              {!isComposerCollapsedMobile &&
+                !isComposerApprovalState &&
+                pendingUserInputs.length === 0 &&
+                composerMessageQuotes.length > 0 && (
+                  <ComposerPendingMessageQuotes
+                    quotes={composerMessageQuotes}
+                    onRemove={(quoteId) =>
+                      removeComposerDraftMessageQuote(composerDraftTarget, quoteId)
+                    }
+                    className="mb-3"
+                  />
                 )}
 
               {!isComposerCollapsedMobile &&

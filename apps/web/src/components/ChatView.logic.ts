@@ -70,6 +70,7 @@ import {
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const RIGHT_PANEL_MAXIMIZED_KEY = "t3code:right-panel-maximized";
 export const RightPanelMaximizedSchema = Schema.Boolean;
+
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
@@ -868,6 +869,11 @@ export function deriveComposerSendState(options: {
    * contexts do: a prompt of just element chips is still a valid send.
    */
   elementContextCount?: number;
+  /**
+   * Quoted assistant spans. Same rule as element contexts: a draft of just
+   * quote chips ("what about this?") is a valid send on its own.
+   */
+  messageQuoteCount?: number;
 }): {
   trimmedPrompt: string;
   sendableTerminalContexts: TerminalContextDraft[];
@@ -879,6 +885,7 @@ export function deriveComposerSendState(options: {
   const expiredTerminalContextCount =
     options.terminalContexts.length - sendableTerminalContexts.length;
   const elementContextCount = options.elementContextCount ?? 0;
+  const messageQuoteCount = options.messageQuoteCount ?? 0;
   return {
     trimmedPrompt,
     sendableTerminalContexts,
@@ -887,7 +894,8 @@ export function deriveComposerSendState(options: {
       trimmedPrompt.length > 0 ||
       options.imageCount > 0 ||
       sendableTerminalContexts.length > 0 ||
-      elementContextCount > 0,
+      elementContextCount > 0 ||
+      messageQuoteCount > 0,
   };
 }
 
