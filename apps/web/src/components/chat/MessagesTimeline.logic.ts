@@ -240,6 +240,12 @@ export type MessagesTimelineRow =
       turnPlan: TurnPlanEntry;
     }
   | {
+      kind: "recap";
+      id: string;
+      createdAt: string;
+      text: string;
+    }
+  | {
       kind: "working";
       id: string;
       createdAt: string | null;
@@ -821,6 +827,16 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (activeWorkEntryIds.has(timelineEntry.id)) {
+      continue;
+    }
+
+    if (timelineEntry.kind === "recap") {
+      nextRows.push({
+        kind: "recap",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        text: timelineEntry.recap.text,
+      });
       continue;
     }
 
