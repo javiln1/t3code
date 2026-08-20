@@ -16,6 +16,7 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
+  resolveComposerSendNowAction,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -106,6 +107,35 @@ describe("composerSubmissionIntentForEnter", () => {
         isDraftThread: false,
       }),
     ).toBe("foreground");
+  });
+});
+
+describe("resolveComposerSendNowAction", () => {
+  it("sends the current draft when it has content", () => {
+    expect(
+      resolveComposerSendNowAction({
+        hasSendableDraft: true,
+        queuedMessageCount: 2,
+      }),
+    ).toBe("draft");
+  });
+
+  it("sends the latest queued message when the composer is empty", () => {
+    expect(
+      resolveComposerSendNowAction({
+        hasSendableDraft: false,
+        queuedMessageCount: 2,
+      }),
+    ).toBe("latest-queued");
+  });
+
+  it("does nothing when both the composer and queue are empty", () => {
+    expect(
+      resolveComposerSendNowAction({
+        hasSendableDraft: false,
+        queuedMessageCount: 0,
+      }),
+    ).toBe(null);
   });
 });
 

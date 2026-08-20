@@ -26,6 +26,7 @@ import {
   buildLoadingThreadFromShell,
   buildRevertTurnCountByUserMessageId,
   buildThreadTurnInterruptInput,
+  canDrainQueuedComposerMessage,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
@@ -1610,5 +1611,31 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         latestTurnStartFailureId: "turn-start-failure-new",
       }),
     ).toBe(true);
+  });
+});
+
+describe("canDrainQueuedComposerMessage", () => {
+  const idle = {
+    phase: "ready" as const,
+    isSendBusy: false,
+    isConnecting: false,
+    isSendInFlight: false,
+    isEditingQueuedMessage: false,
+  };
+
+  it("drains once the turn is over and nothing else is in flight", () => {
+    expect(canDrainQueuedComposerMessage(idle)).toBe(true);
+  });
+
+  it("holds while the agent is running, sending, or connecting", () => {
+    expect(canDrainQueuedComposerMessage({ ...idle, phase: "running" })).toBe(false);
+    expect(canDrainQueuedComposerMessage({ ...idle, isSendBusy: true })).toBe(false);
+    expect(canDrainQueuedComposerMessage({ ...idle, isConnecting: true })).toBe(false);
+    expect(canDrainQueuedComposerMessage({ ...idle, isSendInFlight: true })).toBe(false);
+  });
+
+  // A drain mid-edit would send a half-typed message and destroy the edit.
+  it("holds the whole queue while a queued message is being edited", () => {
+    expect(canDrainQueuedComposerMessage({ ...idle, isEditingQueuedMessage: true })).toBe(false);
   });
 });

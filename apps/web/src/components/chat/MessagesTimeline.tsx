@@ -88,6 +88,7 @@ import {
   MessageCircleIcon,
   Minimize2Icon,
   MousePointerClickIcon,
+  QuoteIcon,
   PaintbrushIcon,
   SearchIcon,
   SquarePenIcon,
@@ -1384,6 +1385,13 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ))}
           </div>
         ) : null}
+        {displayedUserMessage.messageQuotes.length > 0 ? (
+          <div className="mb-2 flex flex-col gap-1.5">
+            {displayedUserMessage.messageQuotes.map((quote) => (
+              <UserMessageQuoteCard key={`${quote.header}:${quote.body}`} text={quote.body} />
+            ))}
+          </div>
+        ) : null}
         <CollapsibleUserMessageBody
           text={elementContextState.promptText}
           terminalContexts={terminalContexts}
@@ -2192,6 +2200,22 @@ const UserMessageElementContextChip = memo(function UserMessageElementContextChi
         {tooltipText}
       </TooltipPopup>
     </Tooltip>
+  );
+});
+
+/**
+ * A span of assistant prose the user quoted into this message. Rendered as a
+ * bordered block rather than a chip: unlike an element pick, the quote's whole
+ * point is the text itself, so hiding it behind a tooltip would defeat it.
+ */
+const UserMessageQuoteCard = memo(function UserMessageQuoteCard(props: { text: string }) {
+  return (
+    <div className="flex gap-2 rounded-md border border-border/60 bg-background/50 px-2 py-1.5">
+      <QuoteIcon className="mt-0.5 size-3 shrink-0 text-foreground/50" />
+      <span className="min-w-0 whitespace-pre-wrap wrap-break-word text-foreground/75 text-xs leading-snug">
+        {props.text}
+      </span>
+    </div>
   );
 });
 

@@ -21,6 +21,7 @@ import {
   stripInlineTerminalContextPlaceholders,
   type TerminalContextDraft,
 } from "./terminalContext";
+import { appendMessageQuotesToPrompt } from "./messageQuoteContext";
 
 function makeContext(overrides?: Partial<TerminalContextDraft>): TerminalContextDraft {
   return {
@@ -123,7 +124,27 @@ describe("terminalContext", () => {
         },
       ],
       elementContexts: [],
+      messageQuotes: [],
     });
+  });
+
+  // Send-time appends terminal, then element, then quotes. Each extractor is
+  // end-anchored, so stripping must run in reverse — get the order wrong and
+  // raw markup leaks into the user's bubble.
+  it("strips a stacked terminal + quote prompt in reverse append order", () => {
+    const withTerminal = appendTerminalContextsToPrompt("Investigate this", [makeContext()]);
+    const prompt = appendMessageQuotesToPrompt(withTerminal, [
+      { messageId: "msg-1", quotedText: "the pipeline downloads 720p" },
+    ]);
+
+    const state = deriveDisplayedUserMessageState(prompt);
+    expect(state.visibleText).toBe("Investigate this");
+    expect(state.visibleText).not.toContain("<terminal_context>");
+    expect(state.visibleText).not.toContain("<quoted_message>");
+    expect(state.contextCount).toBe(1);
+    expect(state.messageQuotes.map((quote) => quote.body)).toEqual(["the pipeline downloads 720p"]);
+    // Copy still yields the full wire text, quotes included.
+    expect(state.copyText).toBe(prompt);
   });
 
   it("preserves prompt text when no trailing terminal context block exists", () => {

@@ -82,7 +82,6 @@ import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
-import { requestResponseNotificationPermission } from "../../responseNotifications";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
 import {
@@ -93,6 +92,7 @@ import {
 import { useProjects } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
+import { requestResponseNotificationPermission } from "../../responseNotifications";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";

@@ -259,6 +259,7 @@ import {
   type ElementContextDraft,
   formatElementContextLabel,
 } from "../lib/elementContext";
+import { appendMessageQuotesToPrompt } from "../lib/messageQuoteContext";
 import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
 import { appendReviewCommentsToPrompt, type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
@@ -353,6 +354,7 @@ import {
   buildLoadingThreadFromShell,
   buildRevertTurnCountByUserMessageId,
   buildThreadTurnInterruptInput,
+  canDrainQueuedComposerMessage,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -374,6 +376,7 @@ import {
   LastInvokedScriptByProjectSchema,
   RIGHT_PANEL_MAXIMIZED_KEY,
   RightPanelMaximizedSchema,
+  type QueuedComposerMessage,
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   cloneComposerImageForRetry,
@@ -450,6 +453,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_QUEUED_MESSAGES: QueuedComposerMessage[] = [];
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1512,6 +1516,7 @@ function ChatViewContent(props: ChatViewProps) {
     (store) => store.setPreviewAnnotations,
   );
   const setComposerDraftReviewComments = useComposerDraftStore((store) => store.setReviewComments);
+  const setComposerDraftMessageQuotes = useComposerDraftStore((store) => store.setMessageQuotes);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
@@ -1584,6 +1589,14 @@ function ChatViewContent(props: ChatViewProps) {
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
+  const [queuedMessagesByThreadKey, setQueuedMessagesByThreadKey] = useState<
+    Record<string, QueuedComposerMessage[]>
+  >({});
+  // Which queued chip is open for inline editing, or null. Only the identity
+  // lives here — the in-progress text stays local to the composer so typing
+  // doesn't re-render this tree. Held here because the drain effect below has
+  // to see it, and has to re-run the moment it clears.
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -6072,6 +6085,7 @@ function ChatViewContent(props: ChatViewProps) {
       annotation: PreviewAnnotationPayload;
       image: ComposerImageAttachment | null;
     },
+    options?: { bypassQueue?: boolean },
   ) => {
     e?.preventDefault();
     const notifyDirectAnnotationAttached = () => {
@@ -6086,10 +6100,8 @@ function ChatViewContent(props: ChatViewProps) {
     };
     if (
       !activeThread ||
-      isSendBusy ||
       isConnecting ||
       threadDetailLoading ||
-      sendInFlightRef.current ||
       feedbackUploadsInFlightRef.current.has(routeThreadKey)
     ) {
       notifyDirectAnnotationAttached();
@@ -6107,6 +6119,15 @@ function ChatViewContent(props: ChatViewProps) {
         }),
         id: `chat-send-environment-unavailable:${toastSlot}`,
       });
+      return;
+    }
+    // Busy dispatch no longer drops text-only sends outright: they fall
+    // through to the queue gate below. Direct annotations retain the
+    // upstream behavior of staying attached to the draft until sending is
+    // available again.
+    const sendBusyNow = isSendBusy || sendInFlightRef.current;
+    if (sendBusyNow && directAnnotation) {
+      notifyDirectAnnotationAttached();
       return;
     }
     if (activePendingProgress) {
@@ -6127,6 +6148,7 @@ function ChatViewContent(props: ChatViewProps) {
       files: composerFiles,
       terminalContexts: composerTerminalContexts,
       elementContexts: composerElementContexts,
+      messageQuotes: composerMessageQuotes,
       previewAnnotations: sendContextPreviewAnnotations,
       reviewComments: composerReviewComments,
       selectedProvider: ctxSelectedProvider,
@@ -6183,6 +6205,7 @@ function ChatViewContent(props: ChatViewProps) {
         composerElementContexts.length +
         composerPreviewAnnotations.length +
         composerReviewComments.length,
+      messageQuoteCount: composerMessageQuotes.length,
     });
     const feedbackCommand =
       ctxSelectedProvider === "codex" &&
@@ -6319,10 +6342,12 @@ function ChatViewContent(props: ChatViewProps) {
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
-      composerReviewComments.length === 0
+      composerReviewComments.length === 0 &&
+      composerMessageQuotes.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
+      if (sendBusyNow) return;
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
@@ -6330,6 +6355,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (!hasSendableContent) {
+      if (sendBusyNow) return;
       if (expiredTerminalContextCount > 0) {
         const toastCopy = buildExpiredTerminalContextToastCopy(
           expiredTerminalContextCount,
@@ -6346,6 +6372,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     if (!activeProject) {
+      if (sendBusyNow) return;
       toastManager.add(
         stackedThreadToast({
           type: "warning",
@@ -6355,6 +6382,42 @@ function ChatViewContent(props: ChatViewProps) {
       );
       return;
     }
+    // Mid-turn text-only sends queue instead of steering; the queue drains
+    // when the turn settles. Attachments/contexts still steer immediately so
+    // their transient payloads are never parked client-side. The busy signal
+    // is deliberately broad (running turn, unsettled turn, or a dispatch in
+    // flight) so the moments just after sending still queue instead of
+    // steering or dropping. Cmd/Ctrl+Enter arrives with bypassQueue to steer.
+    // Message quotes count as a non-text payload even though they serialize to
+    // text: the drain path (sendQueuedMessage) carries only `text`, so a queued
+    // quote would be silently dropped on the way out.
+    const hasNonTextPayload =
+      composerImages.length > 0 ||
+      sendableComposerTerminalContexts.length > 0 ||
+      composerElementContexts.length > 0 ||
+      composerPreviewAnnotations.length > 0 ||
+      composerReviewComments.length > 0 ||
+      composerMessageQuotes.length > 0;
+    // isLatestTurnSettled is false for threads with no turns at all — require
+    // an actual turn before treating "unsettled" as busy, or first messages
+    // would queue with nothing to drain them.
+    const latestTurnUnsettled = activeLatestTurn != null && !latestTurnSettled;
+    const agentBusyForQueue = phase === "running" || latestTurnUnsettled || sendBusyNow;
+    if (agentBusyForQueue && isServerThread && !hasNonTextPayload && !options?.bypassQueue) {
+      setQueuedMessagesByThreadKey((existing) => ({
+        ...existing,
+        [routeThreadKey]: [
+          ...(existing[routeThreadKey] ?? []),
+          { id: newMessageId(), text: trimmed },
+        ],
+      }));
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return;
+    }
+    if (sendBusyNow) return;
+
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
@@ -6378,6 +6441,7 @@ function ChatViewContent(props: ChatViewProps) {
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
+    const composerMessageQuotesSnapshot = [...composerMessageQuotes];
     const messageTextWithContexts = appendElementContextsToPrompt(
       appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
       composerElementContextsSnapshot,
@@ -6386,9 +6450,12 @@ function ChatViewContent(props: ChatViewProps) {
       (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
       messageTextWithContexts,
     );
-    const messageTextForSend = appendReviewCommentsToPrompt(
-      messageTextWithPreviewAnnotations,
-      composerReviewCommentsSnapshot,
+    const messageTextForSend = appendMessageQuotesToPrompt(
+      appendReviewCommentsToPrompt(
+        messageTextWithPreviewAnnotations,
+        composerReviewCommentsSnapshot,
+      ),
+      composerMessageQuotesSnapshot,
     );
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
@@ -6780,6 +6847,8 @@ function ChatViewContent(props: ChatViewProps) {
         (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.previewAnnotations
           .length ?? 0) === 0 &&
         (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.reviewComments
+          .length ?? 0) === 0 &&
+        (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.messageQuotes
           .length ?? 0) === 0
       ) {
         setOptimisticUserMessages((existing) => {
@@ -6803,6 +6872,7 @@ function ChatViewContent(props: ChatViewProps) {
         setComposerDraftElementContexts(composerDraftTarget, composerElementContextsSnapshot);
         setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotationsSnapshot);
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
+        setComposerDraftMessageQuotes(composerDraftTarget, composerMessageQuotesSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
           prompt: promptForSend,
@@ -7174,6 +7244,226 @@ function ChatViewContent(props: ChatViewProps) {
       composerRef,
     ],
   );
+
+  const removeQueuedMessage = useCallback(
+    (queuedId: string) => {
+      setQueuedMessagesByThreadKey((existing) => {
+        const queue = existing[routeThreadKey];
+        if (!queue?.some((queued) => queued.id === queuedId)) return existing;
+        return {
+          ...existing,
+          [routeThreadKey]: queue.filter((queued) => queued.id !== queuedId),
+        };
+      });
+    },
+    [routeThreadKey],
+  );
+
+  // Commit an inline edit. Clearing the text is how you delete from the queue,
+  // and editing a failed entry clears the failure so the fixed-up message
+  // rejoins the drain instead of staying parked.
+  const updateQueuedMessage = useCallback(
+    (queuedId: string, text: string) => {
+      const trimmed = text.trim();
+      setQueuedMessagesByThreadKey((existing) => {
+        const queue = existing[routeThreadKey];
+        if (!queue?.some((queued) => queued.id === queuedId)) return existing;
+        return {
+          ...existing,
+          [routeThreadKey]:
+            trimmed === ""
+              ? queue.filter((queued) => queued.id !== queuedId)
+              : queue.map((queued) =>
+                  queued.id === queuedId ? { id: queued.id, text: trimmed } : queued,
+                ),
+        };
+      });
+    },
+    [routeThreadKey],
+  );
+
+  // The queue is held while an edit is open, so a stale id would freeze it
+  // forever. Drop the edit if its entry left the queue (sent, removed, cleared)
+  // or the route moved to another thread.
+  useEffect(() => {
+    if (editingQueuedMessageId === null) return;
+    const queue = queuedMessagesByThreadKey[routeThreadKey] ?? EMPTY_QUEUED_MESSAGES;
+    if (!queue.some((queued) => queued.id === editingQueuedMessageId)) {
+      setEditingQueuedMessageId(null);
+    }
+  }, [editingQueuedMessageId, queuedMessagesByThreadKey, routeThreadKey]);
+
+  // Text-only direct send for queued messages: the existing-thread subset of
+  // onSend (no bootstrap, no attachments), mirroring onSubmitPlanFollowUp.
+  const sendQueuedMessage = useCallback(
+    async (queued: QueuedComposerMessage): Promise<boolean> => {
+      if (
+        !activeThread ||
+        !isServerThread ||
+        isSendBusy ||
+        isConnecting ||
+        sendInFlightRef.current
+      ) {
+        return false;
+      }
+      const sendCtx = composerRef.current?.getSendContext();
+      if (!sendCtx?.providerAvailable) return false;
+      const {
+        selectedProvider: ctxSelectedProvider,
+        selectedModel: ctxSelectedModel,
+        selectedProviderModels: ctxSelectedProviderModels,
+        selectedPromptEffort: ctxSelectedPromptEffort,
+        selectedModelSelection: ctxSelectedModelSelection,
+      } = sendCtx;
+
+      const threadIdForSend = activeThread.id;
+      const messageIdForSend = newMessageId();
+      const messageCreatedAt = new Date().toISOString();
+      const outgoingMessageText = formatOutgoingPrompt({
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        models: ctxSelectedProviderModels,
+        effort: ctxSelectedPromptEffort,
+        text: queued.text,
+      });
+
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: false });
+      setThreadError(threadIdForSend, null);
+
+      isAtEndRef.current = true;
+      timelineScrollModeRef.current = "anchoring-new-turn";
+      liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+      pendingTimelineAnchorRef.current = messageIdForSend;
+      activeTimelineAnchorIndexRef.current = null;
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+      setTimelineAnchor({
+        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+        messageId: messageIdForSend,
+      });
+
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: outgoingMessageText,
+          turnId: null,
+          createdAt: messageCreatedAt,
+          updatedAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+
+      const startResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: [],
+          },
+          modelSelection: ctxSelectedModelSelection,
+          titleSeed: activeThread.title,
+          runtimeMode,
+          interactionMode,
+          createdAt: messageCreatedAt,
+        },
+      });
+      if (startResult._tag !== "Failure") {
+        sendInFlightRef.current = false;
+        return true;
+      }
+
+      setOptimisticUserMessages((existing) =>
+        existing.filter((message) => message.id !== messageIdForSend),
+      );
+      if (!isAtomCommandInterrupted(startResult)) {
+        const error = squashAtomCommandFailure(startResult);
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error ? error.message : "Failed to send queued message.",
+        );
+      }
+      sendInFlightRef.current = false;
+      resetLocalDispatch();
+      return false;
+    },
+    [
+      activeThread,
+      beginLocalDispatch,
+      composerRef,
+      environmentId,
+      interactionMode,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      resetLocalDispatch,
+      runtimeMode,
+      setThreadError,
+      startThreadTurn,
+    ],
+  );
+
+  const sendQueuedMessageNow = useCallback(
+    (queuedId: string) => {
+      const queued = (queuedMessagesByThreadKey[routeThreadKey] ?? []).find(
+        (entry) => entry.id === queuedId,
+      );
+      if (!queued) return;
+      removeQueuedMessage(queuedId);
+      void sendQueuedMessage(queued).then((sent) => {
+        if (sent) return;
+        setQueuedMessagesByThreadKey((existing) => ({
+          ...existing,
+          [routeThreadKey]: [{ ...queued, failed: true }, ...(existing[routeThreadKey] ?? [])],
+        }));
+      });
+    },
+    [queuedMessagesByThreadKey, removeQueuedMessage, routeThreadKey, sendQueuedMessage],
+  );
+
+  // Drain one queued message after the active run ends; the next drains after
+  // its own run ends. Do not wait on latestTurnSettled here: that timestamp can
+  // lag behind the authoritative session phase and otherwise strand the queue.
+  // Failed entries stay parked (no retry loop).
+  useEffect(() => {
+    if (
+      !canDrainQueuedComposerMessage({
+        phase,
+        isSendBusy,
+        isConnecting,
+        isSendInFlight: sendInFlightRef.current,
+        isEditingQueuedMessage: editingQueuedMessageId !== null,
+      })
+    ) {
+      return;
+    }
+    const nextQueued = (queuedMessagesByThreadKey[routeThreadKey] ?? []).find(
+      (queued) => !queued.failed,
+    );
+    if (!nextQueued) return;
+    removeQueuedMessage(nextQueued.id);
+    void sendQueuedMessage(nextQueued).then((sent) => {
+      if (sent) return;
+      setQueuedMessagesByThreadKey((existing) => ({
+        ...existing,
+        [routeThreadKey]: [{ ...nextQueued, failed: true }, ...(existing[routeThreadKey] ?? [])],
+      }));
+    });
+  }, [
+    editingQueuedMessageId,
+    isConnecting,
+    isSendBusy,
+    phase,
+    queuedMessagesByThreadKey,
+    removeQueuedMessage,
+    routeThreadKey,
+    sendQueuedMessage,
+  ]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     if (
@@ -7989,7 +8279,9 @@ function ChatViewContent(props: ChatViewProps) {
                             onPageScrollKeyDown={onComposerPageScrollKeyDown}
                             onPageScrollKeyUp={onComposerPageScrollKeyUp}
                             onPageScrollRelease={onComposerPageScrollRelease}
-                            onSend={onSend}
+                            onSend={(event, intent, options) =>
+                              onSend(event, intent, undefined, options)
+                            }
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
@@ -8014,6 +8306,14 @@ function ChatViewContent(props: ChatViewProps) {
                             setThreadError={setThreadError}
                             onExpandImage={onExpandTimelineImage}
                             onFileOpen={openFileAttachment}
+                            queuedMessages={
+                              queuedMessagesByThreadKey[routeThreadKey] ?? EMPTY_QUEUED_MESSAGES
+                            }
+                            onRemoveQueuedMessage={removeQueuedMessage}
+                            onSendQueuedMessageNow={sendQueuedMessageNow}
+                            onUpdateQueuedMessage={updateQueuedMessage}
+                            editingQueuedMessageId={editingQueuedMessageId}
+                            onEditingQueuedMessageIdChange={setEditingQueuedMessageId}
                           />
                         </div>
                       </ComposerSurface.Host>

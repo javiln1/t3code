@@ -2611,3 +2611,70 @@ describe("createDebouncedStorage", () => {
     expect(base.setItem).toHaveBeenCalledWith("key", "v2");
   });
 });
+
+describe("composerDraftStore message quotes", () => {
+  const threadId = ThreadId.make("thread-quote");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+  const baseQuote = {
+    messageId: "msg-1",
+    quotedText: "the pipeline downloads 720p",
+  } as const;
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("adds a quote and stamps id + threadId + quotedAt", () => {
+    expect(useComposerDraftStore.getState().addMessageQuote(threadRef, baseQuote)).toBe(true);
+    const entry = draftFor(threadId, TEST_ENVIRONMENT_ID)?.messageQuotes[0]!;
+    expect(entry.id.startsWith("mq_")).toBe(true);
+    expect(entry.threadId).toBe(threadId);
+    expect(entry.quotedAt.length).toBeGreaterThan(0);
+    expect(entry.quotedText).toBe(baseQuote.quotedText);
+  });
+
+  // Re-dragging the same sentence is the common case; it must not stack chips.
+  it("dedupes the same span from the same message, but not across messages", () => {
+    const store = useComposerDraftStore.getState();
+    expect(store.addMessageQuote(threadRef, baseQuote)).toBe(true);
+    expect(store.addMessageQuote(threadRef, baseQuote)).toBe(false);
+    expect(store.addMessageQuote(threadRef, { ...baseQuote, messageId: "msg-2" })).toBe(true);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.messageQuotes).toHaveLength(2);
+  });
+
+  it("removeMessageQuote drops by id and leaves siblings intact", () => {
+    const store = useComposerDraftStore.getState();
+    store.addMessageQuote(threadRef, baseQuote);
+    store.addMessageQuote(threadRef, { ...baseQuote, messageId: "msg-2" });
+    const ids = draftFor(threadId, TEST_ENVIRONMENT_ID)!.messageQuotes.map((q) => q.id);
+    store.removeMessageQuote(threadRef, ids[0]!);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.messageQuotes.map((q) => q.id)).toEqual([
+      ids[1],
+    ]);
+  });
+
+  it("a quote-only draft is retained, and clearing it removes the draft", () => {
+    const store = useComposerDraftStore.getState();
+    store.addMessageQuote(threadRef, baseQuote);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeDefined();
+    store.clearMessageQuotes(threadRef);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+  });
+
+  it("persists quotes via the partializer (round-trippable)", () => {
+    useComposerDraftStore.getState().addMessageQuote(threadRef, baseQuote);
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
+      };
+    };
+    const persisted = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
+      draftsByThreadKey?: Record<string, { messageQuotes?: Array<Record<string, unknown>> }>;
+    };
+    const entry =
+      persisted.draftsByThreadKey?.[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]
+        ?.messageQuotes?.[0];
+    expect(entry?.quotedText).toBe(baseQuote.quotedText);
+    expect(entry?.messageId).toBe(baseQuote.messageId);
+  });
+});

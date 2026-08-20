@@ -36,6 +36,14 @@ export function composerSubmissionIntentForEnter(input: {
   return input.modifierKey && input.isDraftThread ? "background" : "foreground";
 }
 
+export function resolveComposerSendNowAction(input: {
+  hasSendableDraft: boolean;
+  queuedMessageCount: number;
+}): "draft" | "latest-queued" | null {
+  if (input.hasSendableDraft) return "draft";
+  return input.queuedMessageCount > 0 ? "latest-queued" : null;
+}
+
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";
 
 function clampCursor(text: string, cursor: number): number {

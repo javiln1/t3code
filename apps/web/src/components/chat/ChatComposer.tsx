@@ -45,6 +45,7 @@ import {
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
   replaceTextRange,
+  resolveComposerSendNowAction,
 } from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import {
@@ -53,11 +54,14 @@ import {
   readFileAsDataUrl,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
+  type QueuedComposerMessage,
 } from "../ChatView.logic";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
 } from "./composerMentionDrag";
+import { COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME } from "../composerInlineChip";
+import { autoAnimate } from "@formkit/auto-animate";
 import {
   composerFloatingLayerProps,
   isInsideCollapsedComposerControls,
@@ -145,8 +149,10 @@ import {
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
 import { type ElementContextDraft } from "../../lib/elementContext";
+import { type MessageQuoteDraft } from "../../lib/messageQuoteContext";
 import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
 import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
+import { ComposerPendingMessageQuotes } from "./ComposerPendingMessageQuotes";
 import { ComposerPreviewAnnotationCards } from "./ComposerPreviewAnnotationCards";
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
@@ -773,14 +779,19 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
+  ArrowUpIcon,
   BotIcon,
+  CheckIcon,
   CircleAlertIcon,
   FileIcon,
   PaperclipIcon,
+  ClockIcon,
+  PencilIcon,
   PencilRulerIcon,
   PlayIcon,
   type LucideIcon,
@@ -1137,6 +1148,7 @@ export interface ChatComposerHandle {
     files: ComposerFileAttachment[];
     terminalContexts: TerminalContextDraft[];
     elementContexts: ElementContextDraft[];
+    messageQuotes: MessageQuoteDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
     reviewComments: ReviewCommentContext[];
     selectedPromptEffort: string | null;
@@ -1262,7 +1274,11 @@ export interface ChatComposerProps {
   onPageScrollRelease: () => void;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
+  onSend: (
+    e?: { preventDefault: () => void },
+    intent?: ComposerSubmissionIntent,
+    options?: { bypassQueue?: boolean },
+  ) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -1292,6 +1308,17 @@ export interface ChatComposerProps {
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
+
+  // Messages queued while the agent runs; drained when the turn settles.
+  queuedMessages: ReadonlyArray<QueuedComposerMessage>;
+  onRemoveQueuedMessage: (id: string) => void;
+  onSendQueuedMessageNow: (id: string) => void;
+  /** Commit an inline edit. Empty text removes the entry. */
+  onUpdateQueuedMessage: (id: string, text: string) => void;
+  /** Which chip is open for editing. Owned by ChatView: it holds the queue
+      drain while an edit is in progress. */
+  editingQueuedMessageId: string | null;
+  onEditingQueuedMessageIdChange: (id: string | null) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -1305,6 +1332,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     maxFileAttachmentBytes,
+    queuedMessages,
+    onRemoveQueuedMessage,
+    onSendQueuedMessageNow,
+    onUpdateQueuedMessage,
+    editingQueuedMessageId,
+    onEditingQueuedMessageIdChange,
     routeKind,
     routeThreadRef,
     draftId,
@@ -1412,6 +1445,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
     return composerImages.filter((image) => !previewAnnotationIds.has(image.id));
   }, [composerImages, composerPreviewAnnotations]);
+  const composerMessageQuotes = composerDraft.messageQuotes;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const needsReattachFileCount = composerFiles.filter(composerFileNeedsReattach).length;
@@ -1439,6 +1473,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             environmentId,
           })
       : null);
+  const sendNowShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "composer.sendNow"),
+    [keybindings],
+  );
+  const queuedMessagesListRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) autoAnimate(node, { duration: 150, easing: "ease-out" });
+  }, []);
+
+  // In-progress text for the open queue chip edit. Local so keystrokes never
+  // re-render ChatView; only open/close crosses the boundary.
+  const [queuedEditDraft, setQueuedEditDraft] = useState("");
+
+  const beginQueuedMessageEdit = useCallback(
+    (queued: QueuedComposerMessage) => {
+      setQueuedEditDraft(queued.text);
+      onEditingQueuedMessageIdChange(queued.id);
+    },
+    [onEditingQueuedMessageIdChange],
+  );
+
+  const commitQueuedMessageEdit = useCallback(() => {
+    if (editingQueuedMessageId === null) return;
+    onUpdateQueuedMessage(editingQueuedMessageId, queuedEditDraft);
+    onEditingQueuedMessageIdChange(null);
+    setQueuedEditDraft("");
+  }, [
+    editingQueuedMessageId,
+    onEditingQueuedMessageIdChange,
+    onUpdateQueuedMessage,
+    queuedEditDraft,
+  ]);
+
+  const cancelQueuedMessageEdit = useCallback(() => {
+    onEditingQueuedMessageIdChange(null);
+    setQueuedEditDraft("");
+  }, [onEditingQueuedMessageIdChange]);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
@@ -1463,6 +1533,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const removeComposerDraftReviewComment = useComposerDraftStore(
     (store) => store.removeReviewComment,
+  );
+  const removeComposerDraftMessageQuote = useComposerDraftStore(
+    (store) => store.removeMessageQuote,
   );
   const clearComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.clearPersistedAttachments,
@@ -2822,7 +2895,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }, intent: ComposerSubmissionIntent = "foreground") => {
+    (
+      event?: { preventDefault: () => void },
+      intent: ComposerSubmissionIntent = "foreground",
+      options?: { bypassQueue?: boolean },
+    ) => {
       if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
         return;
@@ -2848,7 +2925,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           // ChatView reports its final composed-input preflight through the
           // composer handle before its first asynchronous send step.
           providerInputRejectedRef.current = false;
-          onSend(sendEvent, intent);
+          onSend(sendEvent, intent, options);
           return !providerInputRejectedRef.current;
         },
       });
@@ -2962,6 +3039,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!planModeUiEnabled) return false;
       toggleInteractionMode();
       return true;
+    }
+    // "Composer: Send Now" (default Cmd/Ctrl+Enter, rebindable in Settings →
+    // Keybindings) sends the current draft immediately. If queueing already
+    // cleared the composer, it sends the newest queued item instead.
+    //
+    // Checked BEFORE the trigger menu: a draft ending on an @path / $skill /
+    // /command token leaves the menu open, and letting it swallow the chord
+    // would silently queue the message the user asked to send now.
+    //
+    // Deliberately NOT gated on a local "is the agent busy" check. That gate
+    // used to duplicate ChatView's queue predicate and drifted from it (it
+    // missed an unsettled-but-not-running turn and the in-flight send ref),
+    // so the chord fell through to a plain send and got queued anyway —
+    // hence the infamous "press it twice". bypassQueue is a no-op when
+    // nothing is running, so ChatView stays the only place that decides.
+    if (
+      key === "Enter" &&
+      !isMobileViewport &&
+      resolveShortcutCommand(event, keybindings) === "composer.sendNow"
+    ) {
+      const action = resolveComposerSendNowAction({
+        hasSendableDraft: composerSendState.hasSendableContent,
+        queuedMessageCount: queuedMessages.length,
+      });
+      if (action === "draft") {
+        submitComposer(undefined, "foreground", { bypassQueue: true });
+        return true;
+      }
+      if (action === "latest-queued") {
+        const latestQueued = queuedMessages[queuedMessages.length - 1];
+        if (latestQueued) {
+          onSendQueuedMessageNow(latestQueued.id);
+          return true;
+        }
+      }
+      // Nothing to send: fall through rather than swallow the key.
     }
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive = composerMenuOpenRef.current || trigger !== null;
@@ -4583,6 +4696,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         files: composerFilesRef.current,
         terminalContexts: composerTerminalContextsRef.current,
         elementContexts: composerElementContextsRef.current,
+        messageQuotes: composerMessageQuotes,
         previewAnnotations: composerPreviewAnnotations,
         reviewComments: composerReviewComments,
         selectedPromptEffort,
@@ -5051,6 +5165,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               {!isComposerCollapsedMobile &&
                 !isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&
+                composerMessageQuotes.length > 0 && (
+                  <ComposerPendingMessageQuotes
+                    quotes={composerMessageQuotes}
+                    onRemove={(quoteId) =>
+                      removeComposerDraftMessageQuote(composerDraftTarget, quoteId)
+                    }
+                    className="mb-3"
+                  />
+                )}
+
+              {!isComposerCollapsedMobile &&
+                !isComposerApprovalState &&
+                pendingUserInputs.length === 0 &&
                 composerElementContexts.length > 0 && (
                   <ComposerPendingElementContexts
                     contexts={composerElementContexts}
@@ -5324,6 +5451,217 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     })}
                   </div>
                 )}
+
+              {queuedMessages.length > 0 && (
+                <div ref={queuedMessagesListRef} className="flex flex-col gap-1 pb-2">
+                  <div className="flex items-center gap-1.5 px-1 text-[11px] font-medium leading-tight text-muted-foreground/70">
+                    <ClockIcon className="size-3 shrink-0" />
+                    <span>
+                      {editingQueuedMessageId !== null
+                        ? "Queue held — finish editing to resume"
+                        : queuedMessages.length === 1
+                          ? "Queued — sends when this turn finishes"
+                          : `${queuedMessages.length} queued — send when this turn finishes`}
+                    </span>
+                    {editingQueuedMessageId === null && sendNowShortcutLabel !== null && (
+                      <span className="ml-auto hidden items-center gap-1 text-muted-foreground/50 sm:inline-flex">
+                        <Kbd className="h-4 min-w-4 bg-accent/60 text-[10px]">
+                          {sendNowShortcutLabel}
+                        </Kbd>
+                        sends latest now
+                      </span>
+                    )}
+                  </div>
+                  {queuedMessages.map((queued, index) => {
+                    const isLatestQueued = index === queuedMessages.length - 1;
+                    const isEditingThisQueued = editingQueuedMessageId === queued.id;
+                    return (
+                      <div
+                        key={queued.id}
+                        className={cn(
+                          "group/queued flex items-center gap-2 rounded-md border px-2 py-1 font-medium text-[12px] leading-[1.1]",
+                          queued.failed
+                            ? "border-destructive/35 bg-destructive/8 text-destructive"
+                            : isEditingThisQueued
+                              ? "border-border bg-accent/60 text-foreground"
+                              : "border-border/70 bg-accent/40 text-foreground",
+                        )}
+                      >
+                        {queued.failed ? (
+                          <CircleAlertIcon className="size-3.5 shrink-0 opacity-85" />
+                        ) : isEditingThisQueued ? (
+                          <PencilIcon className="size-3 shrink-0 opacity-70" />
+                        ) : (
+                          <span className="relative flex size-3.5 shrink-0 items-center justify-center">
+                            <span className="absolute size-1.5 animate-ping rounded-full bg-muted-foreground/25" />
+                            <span className="size-1.5 rounded-full bg-muted-foreground/55" />
+                          </span>
+                        )}
+                        {isEditingThisQueued ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={queuedEditDraft}
+                            onChange={(event) => setQueuedEditDraft(event.target.value)}
+                            onBlur={commitQueuedMessageEdit}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                commitQueuedMessageEdit();
+                                return;
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                cancelQueuedMessageEdit();
+                                return;
+                              }
+                              event.stopPropagation();
+                            }}
+                            className="min-w-0 flex-1 bg-transparent leading-tight outline-none placeholder:text-muted-foreground/50"
+                            placeholder="Clear to remove from the queue"
+                            aria-label="Edit queued message"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 cursor-text truncate text-left leading-tight"
+                            onClick={() => beginQueuedMessageEdit(queued)}
+                          >
+                            {queued.text}
+                          </button>
+                        )}
+                        {queued.failed && !isEditingThisQueued && (
+                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                            Failed
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            "flex shrink-0 items-center gap-0.5 transition-opacity",
+                            isEditingThisQueued
+                              ? "opacity-100"
+                              : "opacity-0 group-focus-within/queued:opacity-100 group-hover/queued:opacity-100",
+                          )}
+                        >
+                          {!isEditingThisQueued && (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
+                                      "ml-0 size-5 rounded-md",
+                                    )}
+                                    onClick={() => beginQueuedMessageEdit(queued)}
+                                    aria-label="Edit queued message"
+                                  />
+                                }
+                              >
+                                <PencilIcon className="size-3" />
+                              </TooltipTrigger>
+                              <TooltipPopup side="top">Edit</TooltipPopup>
+                            </Tooltip>
+                          )}
+                          {!isEditingThisQueued && (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
+                                      "ml-0 size-5 rounded-md",
+                                    )}
+                                    onClick={() => onSendQueuedMessageNow(queued.id)}
+                                    aria-label={
+                                      queued.failed
+                                        ? "Retry queued message"
+                                        : "Send queued message now"
+                                    }
+                                  />
+                                }
+                              >
+                                <ArrowUpIcon className="size-3.5" />
+                              </TooltipTrigger>
+                              <TooltipPopup side="top">
+                                {queued.failed ? (
+                                  "Retry now"
+                                ) : isLatestQueued && sendNowShortcutLabel !== null ? (
+                                  <span className="flex items-center gap-1.5">
+                                    Send now
+                                    <Kbd className="h-4 min-w-4 bg-background/20 text-[10px] text-current">
+                                      {sendNowShortcutLabel}
+                                    </Kbd>
+                                  </span>
+                                ) : (
+                                  "Send now"
+                                )}
+                              </TooltipPopup>
+                            </Tooltip>
+                          )}
+                          {isEditingThisQueued && (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
+                                      "ml-0 size-5 rounded-md",
+                                    )}
+                                    onClick={commitQueuedMessageEdit}
+                                    aria-label="Save queued message"
+                                  />
+                                }
+                              >
+                                <CheckIcon className="size-3.5" />
+                              </TooltipTrigger>
+                              <TooltipPopup side="top">Save</TooltipPopup>
+                            </Tooltip>
+                          )}
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
+                                    "ml-0 size-5 rounded-md",
+                                  )}
+                                  onMouseDown={
+                                    isEditingThisQueued
+                                      ? (event) => {
+                                          event.preventDefault();
+                                          cancelQueuedMessageEdit();
+                                        }
+                                      : undefined
+                                  }
+                                  onClick={
+                                    isEditingThisQueued
+                                      ? undefined
+                                      : () => onRemoveQueuedMessage(queued.id)
+                                  }
+                                  aria-label={
+                                    isEditingThisQueued ? "Cancel edit" : "Remove queued message"
+                                  }
+                                />
+                              }
+                            >
+                              <XIcon className="size-3.5" />
+                            </TooltipTrigger>
+                            <TooltipPopup side="top">
+                              {isEditingThisQueued ? "Cancel" : "Remove"}
+                            </TooltipPopup>
+                          </Tooltip>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div
                 className={cn(
