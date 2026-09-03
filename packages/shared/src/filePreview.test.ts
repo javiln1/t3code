@@ -9,19 +9,13 @@ import {
 } from "./filePreview.ts";
 
 describe("workspace file previews", () => {
-  it.each([
-    "report.html",
-    "report.HTM",
-    "document.pdf?download=1",
-    "notes.txt",
-    "README.md",
-    "data.json",
-    "export.csv",
-    "server.log",
-  ])("recognizes browser preview path %s", (path) => {
-    expect(isWorkspaceBrowserPreviewPath(path)).toBe(true);
-    expect(isWorkspacePreviewEntryPath(path)).toBe(true);
-  });
+  it.each(["report.html", "report.HTM", "document.pdf?download=1"])(
+    "recognizes browser preview path %s",
+    (path) => {
+      expect(isWorkspaceBrowserPreviewPath(path)).toBe(true);
+      expect(isWorkspacePreviewEntryPath(path)).toBe(true);
+    },
+  );
 
   it.each([
     "icon.png",
@@ -35,9 +29,12 @@ describe("workspace file previews", () => {
     expect(isWorkspacePreviewEntryPath(path)).toBe(true);
   });
 
-  it.each(["src/index.ts", "image.png.ts", "png"])("rejects non-preview path %s", (path) => {
-    expect(isWorkspacePreviewEntryPath(path)).toBe(false);
-  });
+  it.each(["README.md", "src/index.ts", "image.png.ts", "png"])(
+    "rejects non-preview path %s",
+    (path) => {
+      expect(isWorkspacePreviewEntryPath(path)).toBe(false);
+    },
+  );
 });
 
 describe("media path parsing", () => {
