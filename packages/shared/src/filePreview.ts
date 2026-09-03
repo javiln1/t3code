@@ -71,16 +71,7 @@ export function decodeFilePreviewText(bytes: Uint8Array, truncated = false) {
   }
 }
 
-export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = [
-  ".htm",
-  ".html",
-  ".pdf",
-  ".txt",
-  ".md",
-  ".json",
-  ".csv",
-  ".log",
-] as const;
+export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = [".htm", ".html", ".pdf"] as const;
 
 export const WORKSPACE_IMAGE_PREVIEW_EXTENSIONS = [
   ".avif",
@@ -108,11 +99,6 @@ const BROWSER_MIME_TYPE_BY_EXTENSION = new Map([
   [".htm", "text/html"],
   [".html", "text/html"],
   [".pdf", "application/pdf"],
-  [".txt", "text/plain"],
-  [".md", "text/markdown"],
-  [".json", "application/json"],
-  [".csv", "text/csv"],
-  [".log", "text/plain"],
 ]);
 
 const AUDIO_MIME_TYPE_BY_EXTENSION = new Map([
