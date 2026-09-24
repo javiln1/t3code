@@ -1,11 +1,6 @@
 import { QuoteIcon, X } from "lucide-react";
 
-import {
-  COMPOSER_INLINE_CHIP_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
-} from "../composerInlineChip";
+import { ContextChip, ContextChipAction, ContextChipLabel } from "../ContextChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatMessageQuoteLabel, type MessageQuoteDraft } from "~/lib/messageQuoteContext";
 import { cn } from "~/lib/utils";
@@ -37,13 +32,12 @@ export function ComposerPendingMessageQuotes({
           <Tooltip key={quote.id}>
             <TooltipTrigger
               render={
-                <span className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, "pr-1")}>
-                  <QuoteIcon className={cn(COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, "size-3.5")} />
-                  <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
-                  <button
+                <ContextChip className="pr-1 select-none">
+                  <QuoteIcon />
+                  <ContextChipLabel>{label}</ContextChipLabel>
+                  <ContextChipAction
                     type="button"
                     aria-label={`Remove quote ${label}`}
-                    className={COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -51,11 +45,11 @@ export function ComposerPendingMessageQuotes({
                     }}
                   >
                     <X className="size-3" aria-hidden />
-                  </button>
-                </span>
+                  </ContextChipAction>
+                </ContextChip>
               }
             />
-            <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">
+            <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap">
               {quote.quotedText}
             </TooltipPopup>
           </Tooltip>

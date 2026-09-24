@@ -267,6 +267,16 @@ describe("resolveThreadMetadataUpdateForNextTurn", () => {
 });
 
 describe("deriveComposerSendState", () => {
+  it("allows a quote-only draft and disables send when its last quote is removed", () => {
+    const draft = { prompt: "", imageCount: 0, terminalContexts: [] };
+    expect(deriveComposerSendState({ ...draft, messageQuoteCount: 1 }).hasSendableContent).toBe(
+      true,
+    );
+    expect(deriveComposerSendState({ ...draft, messageQuoteCount: 0 }).hasSendableContent).toBe(
+      false,
+    );
+  });
+
   it("treats expired terminal pills as non-sendable content", () => {
     const state = deriveComposerSendState({
       prompt: "[Terminal 1](t3-context://v1/terminal/ctx-expired)",
