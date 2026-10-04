@@ -872,6 +872,9 @@ export function PreviewView({
         case "reset-zoom":
           handleResetZoom();
           return;
+        case "toggle-device-toolbar":
+          handleToggleDeviceToolbar();
+          return;
         case "toggle-panel":
           return;
       }
