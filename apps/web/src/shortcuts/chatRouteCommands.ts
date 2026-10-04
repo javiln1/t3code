@@ -165,6 +165,8 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       "preview.zoomIn": previewCommand("zoom-in"),
       "preview.zoomOut": previewCommand("zoom-out"),
       "preview.resetZoom": previewCommand("reset-zoom"),
+      // Works from anywhere in the app; only a visible preview panel reacts.
+      "preview.toggleDeviceToolbar": previewCommand("toggle-device-toolbar"),
     },
     {
       when: () =>
