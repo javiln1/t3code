@@ -161,6 +161,14 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      // Works from anywhere in the app; only a visible preview panel reacts.
+      if (command === "preview.toggleDeviceToolbar") {
+        event.preventDefault();
+        event.stopPropagation();
+        dispatchPreviewAction("toggle-device-toolbar");
+        return;
+      }
+
       // The remaining preview commands only fire when the panel is the
       // currently-focused tenant. The `when: previewFocus` rule already
       // gates this, but defend against the keybinding being misconfigured.
