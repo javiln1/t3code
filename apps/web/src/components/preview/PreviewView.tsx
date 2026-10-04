@@ -935,6 +935,9 @@ export function PreviewView({
         case "find":
           handleFind();
           return;
+        case "toggle-device-toolbar":
+          handleToggleDeviceToolbar();
+          return;
         case "toggle-panel":
           return;
       }

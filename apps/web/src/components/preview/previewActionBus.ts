@@ -7,7 +7,8 @@ export type PreviewAction =
   | "zoom-in"
   | "zoom-out"
   | "reset-zoom"
-  | "find";
+  | "find"
+  | "toggle-device-toolbar";
 
 const EVENT_NAME = "t3code:preview-action";
 
