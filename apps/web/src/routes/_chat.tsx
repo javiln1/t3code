@@ -155,6 +155,15 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      // Works from anywhere in the app; only a visible preview panel reacts.
+      if (command === "preview.toggleDeviceToolbar") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!canOperatePreview) return;
+        dispatchPreviewAction("toggle-device-toolbar");
+        return;
+      }
+
       if (
         command === "preview.refresh" ||
         command === "preview.focusUrl" ||
