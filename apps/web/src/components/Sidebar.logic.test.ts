@@ -32,6 +32,8 @@ import {
   type SidebarListMarker,
   type SidebarSection,
   resolveSidebarDropVerb,
+  resolveSidebarThreadSection,
+  foldSidebarPinnedDropTarget,
   groupSidebarThreadsByProject,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
@@ -1465,6 +1467,93 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+  });
+});
+
+describe("Forks section", () => {
+  const base = { snoozed: false, settled: false, pinned: false, working: false, forked: false };
+
+  it.each([
+    ["an idle fork", { forked: true }, "forks"],
+    ["a pinned fork", { forked: true, pinned: true }, "pinned"],
+    ["a running fork", { forked: true, working: true }, "working"],
+    ["a settled fork", { forked: true, settled: true }, "settled"],
+    ["a snoozed fork", { forked: true, snoozed: true }, "snoozed"],
+    ["a top-level thread", {}, "active"],
+  ] as const)("places %s in %s", (_, input, section) => {
+    expect(resolveSidebarThreadSection({ ...base, ...input })).toBe(section);
+  });
+
+  const items: readonly SidebarListItem[] = [
+    { kind: "marker", marker: "pinned-header" },
+    { kind: "thread", key: "p1", section: "pinned" },
+    { kind: "marker", marker: "pinned-divider" },
+    { kind: "marker", marker: "forks-header" },
+    { kind: "thread", key: "f1", section: "forks" },
+    { kind: "marker", marker: "active-placeholder" },
+    { kind: "thread", key: "a1", section: "active" },
+    { kind: "thread", key: "a2", section: "active" },
+    { kind: "marker", marker: "settled-header" },
+    { kind: "marker", marker: "settled-placeholder" },
+  ];
+  const planForkDrop = (overId: string) =>
+    planSidebarThreadDrop({
+      activeKey: "f1",
+      activeSection: "forks",
+      target: resolveSidebarDropTarget(items, "f1", overId)!,
+      pinnedOrder: ["p1"],
+      pinnedKeysById: new Map([["p1", "m"]]),
+      activeOrder: ["a1", "a2"],
+      activeKeysById: new Map(),
+      activeTimeOrdered: true,
+    });
+
+  it("never drops into Forks, and keeps fork rows out of the pinned and inbox orders", () => {
+    expect(resolveSidebarDropTarget(items, "a1", "f1")).toBeNull();
+    expect(resolveSidebarDropTarget(items, "a2", "a1")).toEqual({
+      section: "active",
+      pinnedOrder: ["p1"],
+      activeOrder: ["a2", "a1"],
+    });
+    expect(resolveSidebarDropTarget(items, "a1", "p1")).toEqual({
+      section: "pinned",
+      pinnedOrder: ["a1", "p1"],
+      activeOrder: ["a2"],
+    });
+    expect(resolveSidebarDropVerb("active", "forks")).toBeNull();
+  });
+
+  it("pins and settles fork rows like Active rows, but never reorders them into Active", () => {
+    expect(planForkDrop("p1")).toMatchObject({ kind: "pin", order: ["f1", "p1"] });
+    expect(planForkDrop("sidebar-marker-settled-placeholder")).toEqual({ kind: "settle" });
+    expect(planForkDrop("a2")).toEqual({ kind: "none" });
+  });
+
+  it("pins a drop onto folded Pinned to the top, and ignores pinned rows dropped there", () => {
+    const target = { section: "pinned", pinnedOrder: ["p2", "x"], activeOrder: [] } as const;
+    const pinnedOrder = ["p1", "p2", "p3"];
+    expect(
+      foldSidebarPinnedDropTarget(target, {
+        activeKey: "a1",
+        activeSection: "active",
+        pinnedOrder,
+      }),
+    ).toEqual({ ...target, pinnedOrder: ["a1", "p1", "p2", "p3"] });
+    expect(
+      foldSidebarPinnedDropTarget(target, {
+        activeKey: "p2",
+        activeSection: "pinned",
+        pinnedOrder,
+      }),
+    ).toBeNull();
+    const activeTarget = { section: "active", pinnedOrder: [], activeOrder: ["p2"] } as const;
+    expect(
+      foldSidebarPinnedDropTarget(activeTarget, {
+        activeKey: "p2",
+        activeSection: "pinned",
+        pinnedOrder,
+      }),
+    ).toBe(activeTarget);
   });
 });
 
