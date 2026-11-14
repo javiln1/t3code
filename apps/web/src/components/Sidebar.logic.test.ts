@@ -34,6 +34,8 @@ import {
   resolveSidebarDropVerb,
   resolveSidebarThreadSection,
   foldSidebarPinnedDropTarget,
+  foldSidebarPinnedThreads,
+  resolveSidebarThreadNeedsYou,
   groupSidebarThreadsByProject,
   resolveSidebarFolderDot,
   sidebarFolderExpansionKeys,
@@ -1554,6 +1556,47 @@ describe("Forks section", () => {
         pinnedOrder,
       }),
     ).toBe(activeTarget);
+  });
+
+  it("flags pinned rows waiting on an approval or answer, or showing an unseen Done", () => {
+    const seen = {
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      runtime: null,
+      latestRun: makeLatestRun(),
+      lastVisitedAt: "2026-03-09T10:06:00.000Z",
+    };
+    const unseen = { ...seen, lastVisitedAt: "2026-03-09T10:04:00.000Z" };
+    expect(resolveSidebarThreadNeedsYou({ ...unseen, hasPendingApprovals: true })).toBe("waiting");
+    expect(resolveSidebarThreadNeedsYou({ ...seen, pendingSubagentRequest: "user_input" })).toBe(
+      "waiting",
+    );
+    expect(resolveSidebarThreadNeedsYou(unseen)).toBe("done");
+    expect(resolveSidebarThreadNeedsYou(seen)).toBeNull();
+    expect(resolveSidebarThreadNeedsYou({ ...seen, pendingGuestMessageCount: 1 })).toBeNull();
+  });
+
+  it("folds Pinned to waiting rows, then done rows, in pinned order, then the open thread", () => {
+    const needsYou = new Map<string, "waiting" | "done">([
+      ["d1", "done"],
+      ["w1", "waiting"],
+      ["d2", "done"],
+      ["w2", "waiting"],
+    ]);
+    const fold = (pinned: readonly string[], route: string | null) =>
+      foldSidebarPinnedThreads(pinned, {
+        needsYou: (key) => needsYou.get(key) ?? null,
+        isRoute: (key) => key === route,
+      });
+    expect(fold(["q1", "d1", "w1", "route", "d2", "q2", "w2"], "route")).toEqual({
+      threads: ["w1", "w2", "d1", "d2", "route"],
+      needsYouCount: 4,
+    });
+    expect(fold(["q1", "d1", "w1"], "w1")).toEqual({ threads: ["w1", "d1"], needsYouCount: 2 });
+    expect(fold(["q1", "q2"], "q2")).toEqual({ threads: ["q2"], needsYouCount: 0 });
+    expect(fold(["q1", "q2"], null)).toEqual({ threads: [], needsYouCount: 0 });
   });
 });
 

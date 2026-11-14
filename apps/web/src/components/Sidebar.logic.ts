@@ -1040,9 +1040,39 @@ export function resolveWindowTitleThreadStatus(thread: SidebarThreadStatusInput)
   }
 }
 
-/** Whether the thread's row shows the Done pill. */
-export function isSidebarThreadDone(thread: ThreadStatusInput & SidebarThreadStatusInput): boolean {
-  return resolveSidebarThreadStatus(thread) === "ready" && hasUnseenCompletion(thread);
+/** Whether a thread's row asks the user to act: an approval or question, or the Done pill. */
+export function resolveSidebarThreadNeedsYou(
+  thread: ThreadStatusInput & SidebarThreadStatusInput,
+): "waiting" | "done" | null {
+  const status = resolveSidebarThreadStatus(thread);
+  if (status === "approval" || status === "input") return "waiting";
+  return status === "ready" && hasUnseenCompletion(thread) ? "done" : null;
+}
+
+/**
+ * Folded Pinned lists waiting rows, then done rows, each in pinned order, then the open thread.
+ * `needsYouCount` excludes the open thread unless it needs the user too.
+ */
+export function foldSidebarPinnedThreads<T>(
+  pinned: readonly T[],
+  input: {
+    readonly needsYou: (thread: T) => "waiting" | "done" | null;
+    readonly isRoute: (thread: T) => boolean;
+  },
+): { readonly threads: readonly T[]; readonly needsYouCount: number } {
+  const waiting: T[] = [];
+  const done: T[] = [];
+  let route: T | null = null;
+  for (const thread of pinned) {
+    const needsYou = input.needsYou(thread);
+    if (needsYou === "waiting") waiting.push(thread);
+    else if (needsYou === "done") done.push(thread);
+    else if (input.isRoute(thread)) route = thread;
+  }
+  const threads = [...waiting, ...done];
+  const needsYouCount = threads.length;
+  if (route !== null) threads.push(route);
+  return { threads, needsYouCount };
 }
 
 /**

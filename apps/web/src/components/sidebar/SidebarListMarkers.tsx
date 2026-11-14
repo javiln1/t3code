@@ -115,8 +115,8 @@ export function SidebarSectionHeader(props: {
   label: string;
   /** A muted trailing count. */
   count: number;
-  /** Extra muted text before the count. */
-  detail?: string | null;
+  /** How many of `count` a folded section shows, read as "shown of count". */
+  shown?: number | null;
   className?: string;
   dragging?: boolean;
   isDropTarget?: boolean;
@@ -137,7 +137,7 @@ export function SidebarSectionHeader(props: {
         data-testid={`sidebar-${shelf}-shelf-toggle`}
         accessory={
           <span className="font-normal tabular-nums">
-            {props.detail ? `${props.detail} · ` : null}
+            {props.shown == null ? null : `${props.shown} of `}
             {props.count}
           </span>
         }
