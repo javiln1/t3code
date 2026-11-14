@@ -56,13 +56,25 @@ export function createSidebarCollisionDetection(
       if (pointer.x >= boundary.left && pointer.x <= boundary.right) {
         if (pointer.y < previousY && pointer.y <= boundary.bottom) boundarySection = "pinned";
         else if (pointer.y > previousY && pointer.y >= boundary.top) boundarySection = "active";
-        const nextHeader = (["working-header", "snoozed-header", "settled-header"] as const)
-          .map((marker) =>
-            args.droppableContainers.find((container) => container.id === sidebarMarkerId(marker)),
-          )
-          .find((container) => container !== undefined);
-        const activeBottom = nextHeader?.node.current?.getBoundingClientRect().top;
-        if (boundarySection === "pinned" || (activeBottom != null && pointer.y < activeBottom)) {
+        const markerTop = (marker: SidebarListMarker) =>
+          args.droppableContainers
+            .find((container) => container.id === sidebarMarkerId(marker))
+            ?.node.current?.getBoundingClientRect().top;
+        const activeBottom = (["working-header", "snoozed-header", "settled-header"] as const)
+          .map(markerTop)
+          .find((top) => top !== undefined);
+        // Forks accepts no drops, so the pointer over it must not snap to an Active slot.
+        const forksTop = markerTop("forks-header");
+        const forksBottom = markerTop("active-placeholder");
+        const overForks =
+          forksTop != null &&
+          forksBottom != null &&
+          pointer.y >= forksTop &&
+          pointer.y < forksBottom;
+        if (
+          !overForks &&
+          (boundarySection === "pinned" || (activeBottom != null && pointer.y < activeBottom))
+        ) {
           const target = collisions.find((collision) => {
             const id = String(collision.id);
             if (!sections.has(id)) {
@@ -116,6 +128,7 @@ export function createSidebarSortingStrategy(input: {
     if (!target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
+      forks: [],
       active: [],
       working: [],
       snoozed: [],
@@ -132,7 +145,7 @@ export function createSidebarSortingStrategy(input: {
         }
         continue;
       }
-      if (item.section === "pinned" || item.section === "active" || item.section === "working")
+      if (item.section !== "snoozed" && item.section !== "settled")
         cardHeight ??= rects[index]?.height;
       else slimHeight ??= rects[index]?.height;
       if (item.key !== active.key) groups[item.section].push(item);
@@ -175,6 +188,10 @@ export function createSidebarSortingStrategy(input: {
     marker("pinned-header");
     projected.push(...groups.pinned);
     marker("pinned-divider");
+    if (items.some((item) => item.kind === "marker" && item.marker === "forks-header")) {
+      marker("forks-header");
+      projected.push(...groups.forks);
+    }
     section("active");
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
       marker("working-header");
@@ -194,19 +211,20 @@ export function createSidebarSortingStrategy(input: {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
       const fallback =
-        item.kind === "thread" &&
-        (item.section === "pinned" || item.section === "active" || item.section === "working")
+        item.kind === "thread" && item.section !== "snoozed" && item.section !== "settled"
           ? cardHeight
           : slimHeight;
       const moved = item.kind === "thread" && item.key === active.key;
-      return item.kind === "marker" &&
-        (item.marker === "pinned-header" || item.marker === "pinned-divider")
-        ? labelHeight
-        : item.kind === "marker" && item.marker.endsWith("placeholder")
-          ? slimHeight
-          : moved
-            ? fallback
-            : (rect?.height ?? fallback);
+      // Pinned shows a full header while it has rows, and only a drag label when empty.
+      return item.kind === "marker" && item.marker === "pinned-header"
+        ? Math.max(labelHeight, rect?.height ?? 0)
+        : item.kind === "marker" && item.marker === "pinned-divider"
+          ? labelHeight
+          : item.kind === "marker" && item.marker.endsWith("placeholder")
+            ? slimHeight
+            : moved
+              ? fallback
+              : (rect?.height ?? fallback);
     });
     const firstShelf = items.findIndex(isShelfHeader);
     const shelfRect = rects[firstShelf];
