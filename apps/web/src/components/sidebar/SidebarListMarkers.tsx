@@ -111,21 +111,18 @@ export function SidebarDragBoundary(props: {
 }
 
 export function SidebarSectionHeader(props: {
-  marker: "working-header" | "snoozed-header" | "settled-header";
+  marker: "pinned-header" | "forks-header" | "working-header" | "snoozed-header" | "settled-header";
   label: string;
   /** A muted trailing count. */
   count: number;
+  /** Extra muted text before the count. */
+  detail?: string | null;
   className?: string;
   dragging?: boolean;
   isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
-  const shelf =
-    props.marker === "working-header"
-      ? "working"
-      : props.marker === "snoozed-header"
-        ? "snoozed"
-        : "settled";
+  const shelf = props.marker.slice(0, -"-header".length);
   return (
     <SortableSidebarMarker
       marker={props.marker}
@@ -138,7 +135,12 @@ export function SidebarSectionHeader(props: {
         expanded={props.toggle.expanded}
         tone={props.isDropTarget ? "accent" : props.dragging ? "emphasized" : "muted"}
         data-testid={`sidebar-${shelf}-shelf-toggle`}
-        accessory={<span className="font-normal tabular-nums">{props.count}</span>}
+        accessory={
+          <span className="font-normal tabular-nums">
+            {props.detail ? `${props.detail} · ` : null}
+            {props.count}
+          </span>
+        }
       >
         {props.label}
       </CollapsibleSectionHeader>

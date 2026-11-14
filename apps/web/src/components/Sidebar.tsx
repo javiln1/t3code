@@ -199,8 +199,11 @@ import {
   resolveSidebarSweepKeys,
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
+  foldSidebarPinnedDropTarget,
   resolveSidebarThreadSection,
   resolveSidebarReorderableThreadKeys,
+  isSidebarThreadDone,
+  resolveThreadLastVisitedAt,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
@@ -339,6 +342,8 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
+const PINNED_SHELF_EXPANDED_KEY = "t3code:sidebar:pinned-expanded";
+const FORKS_SHELF_EXPANDED_KEY = "t3code:sidebar:forks-expanded";
 
 const inboxReturns = createInboxReturnTracker();
 
@@ -362,6 +367,8 @@ interface SidebarThreadPartitionInput {
   readonly connectedEnvironmentIds: readonly EnvironmentId[];
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly workingShelfEnabled: boolean;
+  /** Folders already group the inbox, so boring mode has no Forks section. */
+  readonly forksSectionEnabled: boolean;
   /** Boring mode: folders list active threads by the user's latest message. */
   readonly sortActiveBySend: boolean;
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
@@ -471,6 +478,16 @@ function useSidebarThreads(input: {
     false,
     Schema.Boolean,
   );
+  const [pinnedShelfExpanded, setPinnedShelfExpanded] = useLocalStorage(
+    PINNED_SHELF_EXPANDED_KEY,
+    true,
+    Schema.Boolean,
+  );
+  const [forksShelfExpanded, setForksShelfExpanded] = useLocalStorage(
+    FORKS_SHELF_EXPANDED_KEY,
+    true,
+    Schema.Boolean,
+  );
   // Shared with the old per-project sidebar, so folders keep their open state.
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
@@ -492,12 +509,19 @@ function useSidebarThreads(input: {
     connectedEnvironmentIds,
     optimisticDrop,
     workingShelfEnabled,
+    forksSectionEnabled: folderGroups === null,
     sortActiveBySend: folderGroups !== null,
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
+  const {
+    pinnedThreads,
+    forksThreads,
+    activeThreads,
+    workingThreads,
+    snoozedThreads,
+    settledThreads,
+  } = partition;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -530,6 +554,12 @@ function useSidebarThreads(input: {
   const visibleWorkingThreads = workingShelfExpanded
     ? workingThreads
     : routeThreadOnly(workingThreads, routeRowThreadKey);
+  const visiblePinnedThreads = pinnedShelfExpanded
+    ? pinnedThreads
+    : routeThreadOnly(pinnedThreads, routeRowThreadKey);
+  const visibleForksThreads = forksShelfExpanded
+    ? forksThreads
+    : routeThreadOnly(forksThreads, routeRowThreadKey);
   const projectFolders =
     folderGroups === null
       ? null
@@ -551,7 +581,8 @@ function useSidebarThreads(input: {
           };
         });
   const orderedThreads = [
-    ...pinnedThreads,
+    ...visiblePinnedThreads,
+    ...visibleForksThreads,
     ...(projectFolders === null
       ? activeThreads
       : projectFolders.flatMap((folder) => folder.threads)),
@@ -562,6 +593,7 @@ function useSidebarThreads(input: {
   const sectionByThreadKey = new Map<string, SidebarSection>();
   for (const [list, section] of [
     [pinnedThreads, "pinned"],
+    [forksThreads, "forks"],
     [activeThreads, "active"],
     [workingThreads, "working"],
     [snoozedThreads, "snoozed"],
@@ -575,6 +607,7 @@ function useSidebarThreads(input: {
     workingShelfEnabled,
     searchableThreads: [
       ...pinnedThreads,
+      ...forksThreads,
       ...activeThreads,
       ...workingThreads,
       ...snoozedThreads,
@@ -595,6 +628,10 @@ function useSidebarThreads(input: {
     toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
     workingShelfExpanded,
     toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
+    pinnedShelfExpanded,
+    togglePinnedShelf: () => setPinnedShelfExpanded((value) => !value),
+    forksShelfExpanded,
+    toggleForksShelf: () => setForksShelfExpanded((value) => !value),
     projectFolders,
     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
       const keys = sidebarFolderExpansionKeys(group);
@@ -603,6 +640,8 @@ function useSidebarThreads(input: {
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
+    visiblePinnedThreads,
+    visibleForksThreads,
     orderedThreadKeys: orderedThreads.map(threadShellKey),
     threadByKey: new Map(orderedThreads.map((thread) => [threadShellKey(thread), thread] as const)),
     settledThreadKeys: new Set(settledThreads.map(threadShellKey)),
@@ -627,19 +666,25 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     serverConfigs,
     optimisticDrop,
     workingShelfEnabled,
+    forksSectionEnabled,
     sortActiveBySend,
   } = input;
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
+  const forks: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
+  const isForked = (thread: EnvironmentThreadShell) =>
+    forksSectionEnabled && thread.lineage.parentThreadId !== null;
   const inbox = (thread: EnvironmentThreadShell, manuallyMoved = false) =>
     workingShelfEnabled &&
     (manuallyMoved ? isThreadWorking(thread) : inboxObservation.isWorking(thread))
       ? working
-      : active;
+      : isForked(thread)
+        ? forks
+        : active;
   const snoozed: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
   const { draggableThreadKeys, activeReorderableThreadKeys } = resolveSidebarReorderableThreadKeys({
@@ -672,6 +717,8 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
         snoozed: configLoaded && effectiveSnoozed(thread, { now: preciseNow }),
         settled: configLoaded && thread.settledOverride === "settled",
         pinned: thread.pinnedAt != null,
+        working: workingShelfEnabled && inboxObservation.isWorking(thread),
+        forked: isForked(thread),
       });
       (section === "snoozed"
         ? snoozed
@@ -679,17 +726,23 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
           ? settled
           : section === "pinned"
             ? pinned
-            : inbox(thread)
+            : section === "working"
+              ? working
+              : section === "forks"
+                ? forks
+                : active
       ).push(thread);
     }
   }
   // Availability gates dragging only; sorting must stay consistent across clients.
   const sortedPinned = sortPinnedThreadsForSidebar(pinned);
-  const sortedActive = sortActiveBySend
-    ? sortWorkingThreadsBySend(active)
-    : workingShelfEnabled
-      ? sortInboxThreadsByReturn(active, inboxObservation.returnedAt)
-      : sortThreadsForSidebar(active);
+  const sortInbox = (list: EnvironmentThreadShell[]) =>
+    sortActiveBySend
+      ? sortWorkingThreadsBySend(list)
+      : workingShelfEnabled
+        ? sortInboxThreadsByReturn(list, inboxObservation.returnedAt)
+        : sortThreadsForSidebar(list);
+  const sortedActive = sortInbox(active);
   return {
     pinnedThreads:
       optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -701,6 +754,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
           }),
     draggableThreadKeys,
     activeReorderableThreadKeys,
+    forksThreads: sortInbox(forks),
     activeThreads:
       optimisticDrop?.section !== "active" || optimisticDrop.order === null
         ? sortedActive
@@ -1312,6 +1366,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     pinnedThreads,
     draggableThreadKeys,
     activeReorderableThreadKeys,
+    forksThreads,
     activeThreads,
     workingThreads,
     snoozedThreads,
@@ -1329,11 +1384,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleSnoozedShelf,
     workingShelfExpanded,
     toggleWorkingShelf,
+    pinnedShelfExpanded,
+    togglePinnedShelf,
+    forksShelfExpanded,
+    toggleForksShelf,
     projectFolders,
     toggleProjectFolder,
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
+    visiblePinnedThreads,
+    visibleForksThreads,
     orderedThreadKeys,
     threadByKey,
     settledThreadKeys,
@@ -1929,8 +1990,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (list && header) {
       const listRect = list.getBoundingClientRect();
       const scale = list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
+      const headerRect = header.getBoundingClientRect();
       dragLabelOffsetRef.current =
-        header.getBoundingClientRect().top - listRect.top + SIDEBAR_DRAG_LABEL_HEIGHT * scale;
+        headerRect.top -
+        listRect.top +
+        Math.max(headerRect.height, SIDEBAR_DRAG_LABEL_HEIGHT * scale);
     } else {
       dragLabelOffsetRef.current = 0;
     }
@@ -1945,6 +2009,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     });
   };
   const hasProjectFolders = projectFolders !== null && projectFolders.length > 0;
+  const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
+  const pinnedDoneCount = pinnedShelfExpanded
+    ? 0
+    : pinnedThreads.filter((thread) =>
+        isSidebarThreadDone({
+          ...thread,
+          lastVisitedAt: resolveThreadLastVisitedAt(
+            thread.lastVisitedAt,
+            threadLastVisitedAtById[threadShellKey(thread)],
+          ),
+        }),
+      ).length;
+  const forkParentTitleByKey =
+    forksThreads.length === 0
+      ? null
+      : new Map(threads.map((thread) => [threadShellKey(thread), thread.title] as const));
   const sidebarListItemsFresh = ((): readonly SidebarListItem[] => {
     const rowsOf = (
       list: readonly EnvironmentThreadShell[],
@@ -1958,6 +2038,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (
       !hasProjectFolders &&
       pinnedThreads.length +
+        forksThreads.length +
         activeThreads.length +
         workingThreads.length +
         snoozedThreads.length +
@@ -1967,9 +2048,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return [];
     }
     const items: SidebarListItem[] = [{ kind: "marker", marker: "pinned-header" }];
-    const pinnedRows = rowsOf(pinnedThreads, "pinned");
-    items.push(...pinnedRows);
+    items.push(...rowsOf(visiblePinnedThreads, "pinned"));
     items.push({ kind: "marker", marker: "pinned-divider" });
+    if (forksThreads.length > 0) {
+      items.push({ kind: "marker", marker: "forks-header" });
+      items.push(...rowsOf(visibleForksThreads, "forks"));
+    }
     const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
     items.push(...activeRows);
@@ -2034,9 +2118,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     previousShelfExpansionKeyRef.current = shelfExpansionKey;
     listMotionRef.current?.update(listMotionPass.animate && shelvesUnchanged);
   }, [listMotionPass, shelfExpansionKey]);
+  const resolveDropTarget = (activeKey: string, overId: string) => {
+    const target = resolveSidebarDropTarget(sidebarListItems, activeKey, overId);
+    const activeSection = sectionByThreadKey.get(activeKey);
+    return pinnedShelfExpanded || activeSection === undefined
+      ? target
+      : foldSidebarPinnedDropTarget(target, { activeKey, activeSection, pinnedOrder: pinnedKeys });
+  };
+  // Folded pins are not listed, but a drop still writes their order keys.
+  const dropThreadByKey = (key: string) =>
+    threadByKey.get(key) ?? pinnedThreads.find((thread) => threadShellKey(thread) === key);
   const handleThreadDragOver = (event: DragOverEvent) => {
     const target = event.over
-      ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
+      ? resolveDropTarget(String(event.active.id), String(event.over.id))
       : null;
     setDragState((current) =>
       current === null || current.activeKey !== String(event.active.id)
@@ -2077,7 +2171,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (source === undefined) return createSidebarCollisionDetection(() => false);
     return createSidebarCollisionDetection(
       (id) => {
-        const target = resolveSidebarDropTarget(sidebarListItems, draggedThreadKey, id);
+        const target = resolveDropTarget(draggedThreadKey, id);
         if (target === null) return false;
         return (
           planSidebarThreadDrop({
@@ -2107,10 +2201,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (projectFolders !== null) return;
     const activeKey = String(event.active.id);
     const activeSection = sectionByThreadKey.get(activeKey);
-    const target =
-      event.over === null
-        ? null
-        : resolveSidebarDropTarget(sidebarListItems, activeKey, String(event.over.id));
+    const target = event.over === null ? null : resolveDropTarget(activeKey, String(event.over.id));
     const activeThread = threadByKey.get(activeKey);
     if (activeSection === undefined || target === null || activeThread === undefined) return;
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -2143,7 +2234,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (
       !checkThreadOperations(
         [activeKey, ...assignments.map(({ id }) => id)].flatMap((key) => {
-          const thread = threadByKey.get(key);
+          const thread = dropThreadByKey(key);
           return thread ? [thread] : [];
         }),
       )
@@ -2151,7 +2242,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       return;
     const drop = {
       key: activeKey,
-      sourceSection: activeSection,
+      // Canonical sections have no Forks; a fork is an Active thread until it lands.
+      sourceSection: activeSection === "forks" ? "active" : activeSection,
       section: target.section,
       occurredAt: new Date().toISOString(),
       clearsSnooze:
@@ -2228,7 +2320,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       }
       const keyWrites = plan.kind === "pin" ? plan.extraAssignments : plan.assignments;
       for (const assignment of keyWrites) {
-        const thread = threadByKey.get(assignment.id);
+        const thread = dropThreadByKey(assignment.id);
         if (thread === undefined) continue;
         if (
           !(await run(
@@ -3400,7 +3492,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
                         const isCard =
-                          section === "active" || section === "pinned" || section === "working";
+                          section === "active" ||
+                          section === "pinned" ||
+                          section === "forks" ||
+                          section === "working";
+                        const forkParentId =
+                          section === "forks" ? thread.lineage.parentThreadId : null;
+                        const forkParentTitle =
+                          forkParentId === null
+                            ? undefined
+                            : forkParentTitleByKey?.get(
+                                scopedThreadKey(scopeThreadRef(thread.environmentId, forkParentId)),
+                              );
                         const rowVariant = folderRow
                           ? folderRowsMultiline
                             ? "folder-multiline"
@@ -3422,7 +3525,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             variant={rowVariant}
                             navigationParent={
                               folderRow ??
-                              (section === "working" ||
+                              (section === "pinned" ||
+                              section === "forks" ||
+                              section === "working" ||
                               section === "snoozed" ||
                               section === "settled"
                                 ? `shelf:${section}`
@@ -3482,9 +3587,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               null
                             }
                             projectDisplayName={
-                              projectDisplayNameByKey.get(
-                                `${thread.environmentId}:${thread.projectId}`,
-                              ) ?? null
+                              forkParentTitle === undefined
+                                ? (projectDisplayNameByKey.get(
+                                    `${thread.environmentId}:${thread.projectId}`,
+                                  ) ?? null)
+                                : `from ${forkParentTitle}`
                             }
                             providerEntryByInstanceId={
                               providerEntriesByEnvironment.get(thread.environmentId) ??
@@ -3558,12 +3665,42 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         switch (item.marker) {
                           case "pinned-header":
                             items.push(
-                              <SidebarDragBoundary
-                                key="pinned-header"
-                                marker="pinned-header"
-                                label={gt("Pinned", { $context: "sidebar section" })}
-                                visible={from !== null}
-                                isDropTarget={dragTargetSection === "pinned"}
+                              pinnedThreads.length === 0 ? (
+                                <SidebarDragBoundary
+                                  key="pinned-header"
+                                  marker="pinned-header"
+                                  label={gt("Pinned", { $context: "sidebar section" })}
+                                  visible={from !== null}
+                                  isDropTarget={dragTargetSection === "pinned"}
+                                />
+                              ) : (
+                                <SidebarSectionHeader
+                                  key="pinned-header"
+                                  marker="pinned-header"
+                                  label={gt("Pinned", { $context: "sidebar section" })}
+                                  count={pinnedThreads.length}
+                                  detail={pinnedDoneCount > 0 ? `${pinnedDoneCount} done` : null}
+                                  dragging={from !== null}
+                                  isDropTarget={dragTargetSection === "pinned"}
+                                  toggle={{
+                                    expanded: pinnedShelfExpanded,
+                                    onToggle: togglePinnedShelf,
+                                  }}
+                                />
+                              ),
+                            );
+                            break;
+                          case "forks-header":
+                            items.push(
+                              <SidebarSectionHeader
+                                key="forks-header"
+                                marker="forks-header"
+                                label="Forks"
+                                count={forksThreads.length}
+                                toggle={{
+                                  expanded: forksShelfExpanded,
+                                  onToggle: toggleForksShelf,
+                                }}
                               />,
                             );
                             break;
