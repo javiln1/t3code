@@ -202,7 +202,7 @@ import {
   foldSidebarPinnedDropTarget,
   resolveSidebarThreadSection,
   resolveSidebarReorderableThreadKeys,
-  foldSidebarPinnedThreads,
+  foldSidebarThreadsNeedingYou,
   resolveSidebarThreadNeedsYou,
   resolveThreadLastVisitedAt,
   searchSidebarThreads,
@@ -556,23 +556,22 @@ function useSidebarThreads(input: {
     ? workingThreads
     : routeThreadOnly(workingThreads, routeRowThreadKey);
   const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
-  const foldedPinned = pinnedShelfExpanded
-    ? null
-    : foldSidebarPinnedThreads(pinnedThreads, {
-        needsYou: (thread) =>
-          resolveSidebarThreadNeedsYou({
-            ...thread,
-            lastVisitedAt: resolveThreadLastVisitedAt(
-              thread.lastVisitedAt,
-              threadLastVisitedAtById[threadShellKey(thread)],
-            ),
-          }),
-        isRoute: (thread) => threadShellKey(thread) === routeRowThreadKey,
-      });
+  const foldNeedingYou = (section: readonly EnvironmentThreadShell[]) =>
+    foldSidebarThreadsNeedingYou(section, {
+      needsYou: (thread) =>
+        resolveSidebarThreadNeedsYou({
+          ...thread,
+          lastVisitedAt: resolveThreadLastVisitedAt(
+            thread.lastVisitedAt,
+            threadLastVisitedAtById[threadShellKey(thread)],
+          ),
+        }),
+      isRoute: (thread) => threadShellKey(thread) === routeRowThreadKey,
+    });
+  const foldedPinned = pinnedShelfExpanded ? null : foldNeedingYou(pinnedThreads);
   const visiblePinnedThreads = foldedPinned?.threads ?? pinnedThreads;
-  const visibleForksThreads = forksShelfExpanded
-    ? forksThreads
-    : routeThreadOnly(forksThreads, routeRowThreadKey);
+  const foldedForks = forksShelfExpanded ? null : foldNeedingYou(forksThreads);
+  const visibleForksThreads = foldedForks?.threads ?? forksThreads;
   const projectFolders =
     folderGroups === null
       ? null
@@ -656,6 +655,7 @@ function useSidebarThreads(input: {
     visiblePinnedThreads,
     pinnedNeedsYouCount: foldedPinned?.needsYouCount ?? 0,
     visibleForksThreads,
+    forksNeedsYouCount: foldedForks?.needsYouCount ?? 0,
     orderedThreadKeys: orderedThreads.map(threadShellKey),
     threadByKey: new Map(orderedThreads.map((thread) => [threadShellKey(thread), thread] as const)),
     settledThreadKeys: new Set(settledThreads.map(threadShellKey)),
@@ -1410,6 +1410,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     visiblePinnedThreads,
     pinnedNeedsYouCount,
     visibleForksThreads,
+    forksNeedsYouCount,
     orderedThreadKeys,
     threadByKey,
     settledThreadKeys,
@@ -3700,6 +3701,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 marker="forks-header"
                                 label="Forks"
                                 count={forksThreads.length}
+                                shown={forksNeedsYouCount > 0 ? forksNeedsYouCount : null}
                                 toggle={{
                                   expanded: forksShelfExpanded,
                                   onToggle: toggleForksShelf,
