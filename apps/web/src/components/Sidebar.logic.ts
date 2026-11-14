@@ -1051,11 +1051,11 @@ export function resolveSidebarThreadNeedsYou(
 }
 
 /**
- * Folded Pinned lists waiting rows, then done rows, each in pinned order, then the open thread.
- * `needsYouCount` excludes the open thread unless it needs the user too.
+ * A folded Pinned or Forks section lists waiting rows, then done rows, each in section order, then
+ * the open thread. `needsYouCount` excludes the open thread unless it needs the user too.
  */
-export function foldSidebarPinnedThreads<T>(
-  pinned: readonly T[],
+export function foldSidebarThreadsNeedingYou<T>(
+  section: readonly T[],
   input: {
     readonly needsYou: (thread: T) => "waiting" | "done" | null;
     readonly isRoute: (thread: T) => boolean;
@@ -1064,7 +1064,7 @@ export function foldSidebarPinnedThreads<T>(
   const waiting: T[] = [];
   const done: T[] = [];
   let route: T | null = null;
-  for (const thread of pinned) {
+  for (const thread of section) {
     const needsYou = input.needsYou(thread);
     if (needsYou === "waiting") waiting.push(thread);
     else if (needsYou === "done") done.push(thread);

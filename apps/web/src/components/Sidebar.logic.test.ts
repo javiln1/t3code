@@ -35,7 +35,7 @@ import {
   resolveSidebarDropVerb,
   resolveSidebarThreadSection,
   foldSidebarPinnedDropTarget,
-  foldSidebarPinnedThreads,
+  foldSidebarThreadsNeedingYou,
   resolveSidebarThreadNeedsYou,
   groupSidebarThreadsByProject,
   resolveSidebarFolderDot,
@@ -1608,15 +1608,15 @@ describe("Forks section", () => {
     expect(resolveSidebarThreadNeedsYou({ ...seen, pendingGuestMessageCount: 1 })).toBeNull();
   });
 
-  it("folds Pinned to waiting rows, then done rows, in pinned order, then the open thread", () => {
+  it("folds Pinned and Forks to waiting rows, then done rows, in section order, then the open thread", () => {
     const needsYou = new Map<string, "waiting" | "done">([
       ["d1", "done"],
       ["w1", "waiting"],
       ["d2", "done"],
       ["w2", "waiting"],
     ]);
-    const fold = (pinned: readonly string[], route: string | null) =>
-      foldSidebarPinnedThreads(pinned, {
+    const fold = (section: readonly string[], route: string | null) =>
+      foldSidebarThreadsNeedingYou(section, {
         needsYou: (key) => needsYou.get(key) ?? null,
         isRoute: (key) => key === route,
       });
