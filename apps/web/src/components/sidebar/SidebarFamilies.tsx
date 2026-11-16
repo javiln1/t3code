@@ -1,14 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS as DndCSS } from "@dnd-kit/utilities";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import {
-  BotIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  EyeIcon,
-  EyeOffIcon,
-  GitForkIcon,
-} from "lucide-react";
+import { BotIcon, ChevronRightIcon, EyeIcon, EyeOffIcon, GitForkIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { Children, type MouseEvent as ReactMouseEvent, type ReactNode, useState } from "react";
 import { cn } from "~/lib/utils";
@@ -272,14 +265,14 @@ export function SidebarForkGroup(props: {
           props.onToggle();
         }}
         onDoubleClick={stop}
-        // ms-1.5 plus px-1 lines the chevron up with the card's text at --sidebar-row-content-inset.
+        // ms-1.5 plus px-1 lines the text up with the card's text at --sidebar-row-content-inset.
         className="ms-1.5 flex h-4.5 cursor-pointer items-center gap-1 rounded-sm px-1 text-2xs text-muted-foreground/60 tabular-nums outline-none transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <ChevronDownIcon
-          aria-hidden
-          className={cn("size-3 transition-transform", props.expanded && "rotate-180")}
-        />
         {props.count} {noun}
+        <ChevronRightIcon
+          aria-hidden
+          className={cn("size-3 transition-transform", props.expanded && "rotate-90")}
+        />
       </button>
       {Children.count(props.children) > 0 ? (
         <ul
