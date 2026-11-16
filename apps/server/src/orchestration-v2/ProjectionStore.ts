@@ -1911,6 +1911,9 @@ export function threadShellFromProjection(
     ...(projection.thread.linkOrigin === undefined
       ? {}
       : { linkOrigin: projection.thread.linkOrigin }),
+    ...(projection.thread.launchedByClient === undefined
+      ? {}
+      : { launchedByClient: projection.thread.launchedByClient }),
     ...(projection.thread.delegatedFrom === undefined
       ? {}
       : { delegatedFrom: projection.thread.delegatedFrom }),
@@ -2225,6 +2228,9 @@ function shellFromState(input: {
     ...(input.state.thread.linkOrigin === undefined
       ? {}
       : { linkOrigin: input.state.thread.linkOrigin }),
+    ...(input.state.thread.launchedByClient === undefined
+      ? {}
+      : { launchedByClient: input.state.thread.launchedByClient }),
     ...(input.state.thread.delegatedFrom === undefined
       ? {}
       : { delegatedFrom: input.state.thread.delegatedFrom }),

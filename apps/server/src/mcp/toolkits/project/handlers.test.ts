@@ -62,8 +62,11 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  /** Who calls: an outside client (default), a T3 thread, or a linked environment. */
+  readonly caller?: "thread" | "linked";
 }) => {
   const projectId = ProjectId.make("project:client-target");
+  const callerThreadId = ThreadId.make("thread:caller");
   const modelSelection = {
     instanceId: ProviderInstanceId.make("claudeAgent"),
     model: "claude-opus",
@@ -99,19 +102,42 @@ const clientLaunchHarness = (input: {
     Layer.succeed(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment"),
       requestNamespace: "client:session-1",
-      thread: undefined,
-      client: {
-        sessionId: "session-1",
-        label: "Claude Code",
-        access: input.runtimeModeCeiling,
-        hostedAppUrl: input.hostedAppUrl,
-      },
+      thread:
+        input.caller === "thread"
+          ? {
+              threadId: callerThreadId,
+              providerSessionId: "provider-session",
+              providerInstanceId: modelSelection.instanceId,
+            }
+          : undefined,
+      client:
+        input.caller === "thread"
+          ? undefined
+          : {
+              sessionId: "session-1",
+              label: "Claude Code",
+              access: input.runtimeModeCeiling,
+              hostedAppUrl: input.hostedAppUrl,
+              ...(input.caller === "linked" ? { linked: true } : {}),
+            },
       issuedAt: 0,
       capabilities: new Set(["orchestration" as const]),
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       // A thread exists once a launch started it.
       getThreadShell: (threadId) => {
+        if (threadId === callerThreadId)
+          return Effect.succeed({
+            id: callerThreadId,
+            projectId,
+            providerInstanceId: modelSelection.instanceId,
+            modelSelection,
+            runtimeMode: input.runtimeModeCeiling,
+            interactionMode: "default",
+            activeRunId: "run:caller",
+            archivedAt: null,
+            deletedAt: null,
+          } as unknown as OrchestrationV2ThreadShell);
         const launch = input.launched.find((candidate) => candidate.threadId === threadId);
         return Effect.succeed(
           launch === undefined
@@ -417,6 +443,39 @@ it.effect("a launch with a model its provider does not advertise creates no thre
       modelSelection: { instanceId: "claudeAgent", model: "Opus" },
     });
     expect(launched).toHaveLength(1);
+  }),
+);
+
+it.effect("only a launch from an outside client names that client on the thread", () =>
+  Effect.gen(function* () {
+    const launchAs = Effect.fn("test.launchAs")(function* (caller?: "thread" | "linked") {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const { projectId, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "full-access",
+        launched,
+        ...(caller === undefined ? {} : { caller }),
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      yield* toolkit
+        .handle("t3_thread_launch", { title: "Fix", projectId, message: "Fix the bug" })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+      expect(launched).toHaveLength(1);
+      return launched[0];
+    });
+
+    expect((yield* launchAs())?.launchedByClient).toBe("Claude Code");
+    const fromThread = yield* launchAs("thread");
+    expect(fromThread?.initialMessage?.senderThreadId).toBe("thread:caller");
+    expect(fromThread?.launchedByClient).toBeUndefined();
+    const fromLink = yield* launchAs("linked");
+    expect(fromLink?.linkOrigin?.label).toBe("Claude Code");
+    expect(fromLink?.launchedByClient).toBeUndefined();
   }),
 );
 

@@ -383,6 +383,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           createdBy: "agent",
           creationSource: "mcp",
           ...(linkOrigin === undefined ? {} : { linkOrigin }),
+          // An outside client (not a T3 thread, not a linked environment) gets its own sidebar section.
+          ...(caller === undefined && linkOrigin === undefined && scope.client !== undefined
+            ? { launchedByClient: scope.client.label }
+            : {}),
           // Kept only alongside linkOrigin: thread.create drops it otherwise.
           ...(input.delegatedFrom === undefined ? {} : { delegatedFrom: input.delegatedFrom }),
         }).pipe(

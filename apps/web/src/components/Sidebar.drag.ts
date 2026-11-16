@@ -1,7 +1,9 @@
 import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/core";
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
 import {
+  isSidebarForkGroupId,
   resolveSidebarDropTarget,
+  SIDEBAR_GROKBOT_ITEM,
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
@@ -40,7 +42,12 @@ export function createSidebarCollisionDetection(
   let previousPointerY = options.activationY;
   let boundarySection: "pinned" | "active" | undefined;
   return (args) => {
-    let collisions = closestCenter(args);
+    let collisions = closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (container) => !isSidebarForkGroupId(container.id),
+      ),
+    });
     const pointer = args.pointerCoordinates;
     const items = options.items;
     const source = items?.find((item) => item.kind === "thread" && item.key === args.active.id);
@@ -56,25 +63,13 @@ export function createSidebarCollisionDetection(
       if (pointer.x >= boundary.left && pointer.x <= boundary.right) {
         if (pointer.y < previousY && pointer.y <= boundary.bottom) boundarySection = "pinned";
         else if (pointer.y > previousY && pointer.y >= boundary.top) boundarySection = "active";
-        const markerTop = (marker: SidebarListMarker) =>
-          args.droppableContainers
-            .find((container) => container.id === sidebarMarkerId(marker))
-            ?.node.current?.getBoundingClientRect().top;
-        const activeBottom = (["working-header", "snoozed-header", "settled-header"] as const)
-          .map(markerTop)
-          .find((top) => top !== undefined);
-        // Forks accepts no drops, so the pointer over it must not snap to an Active slot.
-        const forksTop = markerTop("forks-header");
-        const forksBottom = markerTop("active-placeholder");
-        const overForks =
-          forksTop != null &&
-          forksBottom != null &&
-          pointer.y >= forksTop &&
-          pointer.y < forksBottom;
-        if (
-          !overForks &&
-          (boundarySection === "pinned" || (activeBottom != null && pointer.y < activeBottom))
-        ) {
+        const nextHeader = (["working-header", "snoozed-header", "settled-header"] as const)
+          .map((marker) =>
+            args.droppableContainers.find((container) => container.id === sidebarMarkerId(marker)),
+          )
+          .find((container) => container !== undefined);
+        const activeBottom = nextHeader?.node.current?.getBoundingClientRect().top;
+        if (boundarySection === "pinned" || (activeBottom != null && pointer.y < activeBottom)) {
           const target = collisions.find((collision) => {
             const id = String(collision.id);
             if (!sections.has(id)) {
@@ -117,6 +112,9 @@ export function createSidebarSortingStrategy(input: {
   if (input.enabled === false) return () => stationary;
   const { items } = input;
   const indices = new Map(items.map((item, index) => [sidebarListItemId(item), index]));
+  const forkGroupIndices = new Map(
+    items.flatMap((item, index) => (item.kind === "forks" ? [[item.key, index] as const] : [])),
+  );
   let previous: Pick<Layout, "rects" | "activeIndex" | "overIndex"> | undefined;
   let transforms: ReturnType<SortingStrategy>[] | null = [];
 
@@ -128,7 +126,6 @@ export function createSidebarSortingStrategy(input: {
     if (!target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
-      forks: [],
       active: [],
       working: [],
       snoozed: [],
@@ -145,7 +142,8 @@ export function createSidebarSortingStrategy(input: {
         }
         continue;
       }
-      if (item.section !== "snoozed" && item.section !== "settled")
+      if (item.kind === "forks") continue;
+      if (item.section === "pinned" || item.section === "active" || item.section === "working")
         cardHeight ??= rects[index]?.height;
       else slimHeight ??= rects[index]?.height;
       if (item.key !== active.key) groups[item.section].push(item);
@@ -188,11 +186,8 @@ export function createSidebarSortingStrategy(input: {
     marker("pinned-header");
     projected.push(...groups.pinned);
     marker("pinned-divider");
-    if (items.some((item) => item.kind === "marker" && item.marker === "forks-header")) {
-      marker("forks-header");
-      projected.push(...groups.forks);
-    }
     section("active");
+    if (indices.has(sidebarListItemId(SIDEBAR_GROKBOT_ITEM))) projected.push(SIDEBAR_GROKBOT_ITEM);
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {
       marker("working-header");
       projected.push(...groups.working);
@@ -207,11 +202,17 @@ export function createSidebarSortingStrategy(input: {
     }
     marker("settled-header");
     section("settled");
-    const heights = projected.map((item) => {
+    // A mounted fork line follows its parent; the dragged parent's waits under its landing slot.
+    const rows = projected.flatMap((item) => {
+      const forks = item.kind === "thread" ? forkGroupIndices.get(item.key) : undefined;
+      return forks !== undefined && rects[forks] ? [item, items[forks]!] : [item];
+    });
+    const heights = rows.map((item) => {
       const index = indices.get(sidebarListItemId(item));
       const rect = index === undefined ? undefined : rects[index];
       const fallback =
-        item.kind === "thread" && item.section !== "snoozed" && item.section !== "settled"
+        item.kind === "thread" &&
+        (item.section === "pinned" || item.section === "active" || item.section === "working")
           ? cardHeight
           : slimHeight;
       const moved = item.kind === "thread" && item.key === active.key;
@@ -239,7 +240,7 @@ export function createSidebarSortingStrategy(input: {
         : 0;
     const result = items.map(() => hidden);
     let top = rects[0].top;
-    for (const [projectedIndex, item] of projected.entries()) {
+    for (const [projectedIndex, item] of rows.entries()) {
       if (isShelfHeader(item)) {
         top += shelfSpace;
         shelfSpace = 0;

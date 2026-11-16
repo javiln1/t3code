@@ -88,6 +88,7 @@ export function withCreationProvenance(
       // Only the server stamps a link's origin or folds in a first message, so a client cannot.
       const {
         linkOrigin: _linkOrigin,
+        launchedByClient: _launchedByClient,
         delegatedFrom: _delegatedFrom,
         initialMessage: _initialMessage,
         ...rest

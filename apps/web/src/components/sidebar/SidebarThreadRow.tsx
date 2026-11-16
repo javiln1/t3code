@@ -84,6 +84,11 @@ import { useEnvironmentQuery } from "../../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { formatRelativeTime, parseTimestampDate } from "../../timestampFormat";
 import type { SidebarThreadSummary } from "../../types";
+import {
+  SidebarRowLineageIcon,
+  type SidebarFamilyRowProps,
+  useSidebarFamilyStatusSource,
+} from "./SidebarFamilies";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
@@ -632,7 +637,7 @@ type SidebarThreadRowProps = {
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
-};
+} & SidebarFamilyRowProps;
 
 // Mounted only while renaming, so each rename starts uncommitted.
 function ThreadRenameInput(props: {
@@ -766,8 +771,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
     : null;
 
-  const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarRowStatus({ ...thread, lastVisitedAt });
+  const statusThread = useSidebarFamilyStatusSource(props.familyStatusFrom) ?? {
+    ...thread,
+    lastVisitedAt,
+  };
+  const isUnread = hasUnseenCompletion(statusThread);
+  const status = resolveSidebarRowStatus(statusThread);
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -1258,15 +1267,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     )
   ) : null;
 
-  const forkIndicator =
-    thread.lineage.relationshipToParent === "fork" ? (
-      <GitForkIcon
-        aria-label="Forked thread"
-        role="img"
-        className="size-3 shrink-0 text-muted-foreground/65"
-      />
-    ) : null;
-
   const remoteMachineIcon =
     isRemote && !showsScratchMachine ? (
       <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
@@ -1395,7 +1395,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {title}
               {multiline ? titleLineIcons : null}
               {pinIndicator}
-              {forkIndicator}
+              <SidebarRowLineageIcon thread={thread} />
               {multiline ? null : terminalStatusIcon}
               {multiline ? null : issueBadge}
               {isRegeneratingTitle ? (
@@ -1590,7 +1590,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {forkIndicator}
+              <SidebarRowLineageIcon thread={thread} />
               {props.projectDisplayName ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
@@ -1649,7 +1649,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             topStatus.className,
                           )}
                         >
-                          <TopStatusIcon icon={topStatus.icon} className="size-4" />
+                          {props.familyStatusFrom ? (
+                            <GitForkIcon
+                              role="img"
+                              aria-label="From a fork"
+                              className="size-3.5 shrink-0"
+                            />
+                          ) : (
+                            <TopStatusIcon icon={topStatus.icon} className="size-4" />
+                          )}
                           {/* Not a live region: a collapsed sidebar is inert, so
                             BackgroundThreadAnnouncer and the open thread's
                             timeline speak status changes instead. */}
@@ -1658,14 +1666,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             <span aria-hidden>
                               <WorkingDuration
                                 environmentId={thread.environmentId}
-                                startedAt={resolveWorkingStartedAt(thread)}
+                                startedAt={resolveWorkingStartedAt(statusThread)}
                               />
                             </span>
                           ) : status === "waiting" ? (
                             <span aria-hidden>
                               <WorkingDuration
                                 environmentId={thread.environmentId}
-                                startedAt={thread.latestRun?.completedAt ?? null}
+                                startedAt={statusThread.latestRun?.completedAt ?? null}
                               />
                             </span>
                           ) : null}

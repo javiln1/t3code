@@ -1,13 +1,14 @@
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { type ReactNode, useLayoutEffect } from "react";
+import { type ComponentProps, type ReactNode, useLayoutEffect } from "react";
 import { cn } from "~/lib/utils";
 import {
   animateSidebarLayoutChanges,
   sidebarMarkerId,
   type SidebarListMarker,
 } from "../Sidebar.logic";
+import { SidebarFoldAccessory, SidebarFoldEye } from "./SidebarFamilies";
 import { SIDEBAR_SORTABLE_DRAG_DISABLED } from "./SidebarThreadRow";
 
 function SortableSidebarMarker(props: {
@@ -111,23 +112,24 @@ export function SidebarDragBoundary(props: {
 }
 
 export function SidebarSectionHeader(props: {
-  marker: "pinned-header" | "forks-header" | "working-header" | "snoozed-header" | "settled-header";
+  marker: "pinned-header" | "working-header" | "snoozed-header" | "settled-header";
   label: string;
   /** A muted trailing count. */
   count: number;
-  /** How many of `count` a folded section shows, read as "shown of count". */
-  shown?: number | null;
+  /** A folded Pinned: how many families it shows, the dot, and the eye. */
+  fold?: (ComponentProps<typeof SidebarFoldEye> & { shown: number; loud: boolean }) | null;
   className?: string;
   dragging?: boolean;
   isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
   const shelf = props.marker.slice(0, -"-header".length);
+  const { fold } = props;
   return (
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className={cn("relative mx-0.5 h-8", props.className)}
+      className={cn("group/sidebar-fold relative mx-0.5 h-8", props.className)}
     >
       <CollapsibleSectionHeader
         data-sidebar-row={`shelf:${shelf}`}
@@ -136,14 +138,17 @@ export function SidebarSectionHeader(props: {
         tone={props.isDropTarget ? "accent" : props.dragging ? "emphasized" : "muted"}
         data-testid={`sidebar-${shelf}-shelf-toggle`}
         accessory={
-          <span className="font-normal tabular-nums">
-            {props.shown == null ? null : `${props.shown} of `}
-            {props.count}
-          </span>
+          <SidebarFoldAccessory
+            count={props.count}
+            shown={fold && !fold.hideAll && fold.shown > 0 ? fold.shown : null}
+            dot={fold != null && fold.hideAll && fold.loud}
+            reserveEye={fold != null}
+          />
         }
       >
         {props.label}
       </CollapsibleSectionHeader>
+      {fold ? <SidebarFoldEye hideAll={fold.hideAll} onToggle={fold.onToggle} /> : null}
     </SortableSidebarMarker>
   );
 }

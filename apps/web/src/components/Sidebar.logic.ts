@@ -191,21 +191,16 @@ export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
 
 // Snoozed rows cannot accept drops without a wake time. Working rows only drag out as chat context.
 
-export type SidebarSection = "pinned" | "forks" | "active" | "working" | "snoozed" | "settled";
+export type SidebarSection = "pinned" | "active" | "working" | "snoozed" | "settled";
 
 export function resolveSidebarThreadSection(input: {
   readonly snoozed: boolean;
   readonly settled: boolean;
   readonly pinned: boolean;
-  readonly working?: boolean;
-  /** A listed thread with a parent, such as a fork. */
-  readonly forked?: boolean;
 }): SidebarSection {
   if (input.snoozed) return "snoozed";
   if (input.settled) return "settled";
   if (input.pinned) return "pinned";
-  if (input.working) return "working";
-  if (input.forked) return "forks";
   return "active";
 }
 
@@ -213,7 +208,6 @@ const SIDEBAR_MARKER_PREFIX = "sidebar-marker-";
 
 export type SidebarListMarker =
   | "pinned-header"
-  | "forks-header"
   | "active-placeholder"
   | "settled-placeholder"
   | "pinned-divider"
@@ -225,12 +219,30 @@ export function sidebarMarkerId(marker: SidebarListMarker): string {
   return `${SIDEBAR_MARKER_PREFIX}${marker}`;
 }
 
+const SIDEBAR_FORKS_PREFIX = "sidebar-forks-";
+
+/** The fork line under a parent row; listed so it moves with the parent, never a drop target. */
+export function sidebarForkGroupId(parentKey: string): string {
+  return `${SIDEBAR_FORKS_PREFIX}${parentKey}`;
+}
+
+/** Grokbot's section rides below the active rows the same way. Thread keys always hold a colon. */
+export const SIDEBAR_GROKBOT_ITEM = { kind: "forks", key: "grokbot" } as const;
+
+export const isSidebarForkGroupId = (id: string | number) =>
+  String(id).startsWith(SIDEBAR_FORKS_PREFIX);
+
 export type SidebarListItem =
   | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
+  | { readonly kind: "forks"; readonly key: string }
   | { readonly kind: "marker"; readonly marker: SidebarListMarker };
 
 export function sidebarListItemId(item: SidebarListItem): string {
-  return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
+  return item.kind === "thread"
+    ? item.key
+    : item.kind === "forks"
+      ? sidebarForkGroupId(item.key)
+      : sidebarMarkerId(item.marker);
 }
 
 function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number): SidebarSection {
@@ -238,9 +250,7 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
   for (let i = 0; i < index && i < items.length; i += 1) {
     const item = items[i]!;
     if (item.kind !== "marker") continue;
-    if (item.marker === "pinned-divider" || item.marker === "active-placeholder")
-      section = "active";
-    else if (item.marker === "forks-header") section = "forks";
+    if (item.marker === "pinned-divider") section = "active";
     else if (item.marker === "working-header") section = "working";
     else if (item.marker === "snoozed-header") section = "snoozed";
     else if (item.marker === "settled-header") section = "settled";
@@ -265,42 +275,24 @@ export function resolveSidebarDropTarget(
   const moved = items.filter((_, index) => index !== activeIndex);
   moved.splice(overIndex, 0, items[activeIndex]!);
   const section = sectionAtSidebarSlot(moved, overIndex);
-  if (section === "working" || section === "forks" || section === "snoozed") return null;
+  if (section === "working" || section === "snoozed") return null;
   const pinnedOrder: string[] = [];
   const activeOrder: string[] = [];
   let currentSection: SidebarSection = "pinned";
   for (const item of moved) {
     if (item.kind === "marker") {
-      if (item.marker === "pinned-divider" || item.marker === "active-placeholder")
-        currentSection = "active";
-      else if (item.marker === "forks-header") currentSection = "forks";
+      if (item.marker === "pinned-divider") currentSection = "active";
       else if (
         item.marker === "working-header" ||
         item.marker === "snoozed-header" ||
         item.marker === "settled-header"
       )
         break;
-    } else if (currentSection === "pinned") pinnedOrder.push(item.key);
-    else if (currentSection === "active") activeOrder.push(item.key);
+    } else if (item.kind === "forks") continue;
+    else if (currentSection === "pinned") pinnedOrder.push(item.key);
+    else activeOrder.push(item.key);
   }
   return { section, pinnedOrder, activeOrder };
-}
-
-/** A folded Pinned section hides its order, so a drop there can only pin to the top. */
-export function foldSidebarPinnedDropTarget(
-  target: SidebarDropTarget | null,
-  input: {
-    readonly activeKey: string;
-    readonly activeSection: SidebarSection;
-    readonly pinnedOrder: readonly string[];
-  },
-): SidebarDropTarget | null {
-  if (target?.section !== "pinned") return target;
-  if (input.activeSection === "pinned") return null;
-  return {
-    ...target,
-    pinnedOrder: [input.activeKey, ...input.pinnedOrder.filter((key) => key !== input.activeKey)],
-  };
 }
 
 type SidebarThreadDropPlan =
@@ -332,8 +324,7 @@ export function resolveSidebarDropVerb(
   from: SidebarSection,
   to: SidebarSection | null,
 ): SidebarDropVerb | null {
-  if (to === null || to === from || to === "working" || to === "forks" || to === "snoozed")
-    return null;
+  if (to === null || to === from || to === "working" || to === "snoozed") return null;
   if (to === "pinned") return "pin";
   if (to === "settled") return "settle";
   if (from === "pinned") return "unpin";
@@ -418,9 +409,7 @@ export function planSidebarThreadDrop(input: {
     activeKeysById,
     activeReorderableKeys,
   } = input;
-  // Forks pin and settle like Active rows, but their inbox position follows Active's order.
-  if (activeSection === "working" || (activeSection === "forks" && target.section === "active"))
-    return { kind: "none" };
+  if (activeSection === "working") return { kind: "none" };
   if (input.supportsSettlement === false && (target.section === "settled" || activeSettled)) {
     return { kind: "none" };
   }
@@ -1017,41 +1006,6 @@ export function resolveWindowTitleThreadStatus(
     default:
       return null;
   }
-}
-
-/** Whether a thread's row asks the user to act: an approval or question, or the Done pill. */
-export function resolveSidebarThreadNeedsYou(
-  thread: ThreadStatusInput & SidebarThreadStatusInput,
-): "waiting" | "done" | null {
-  const status = resolveSidebarThreadStatus(thread);
-  if (status === "approval" || status === "input") return "waiting";
-  return status === "ready" && hasUnseenCompletion(thread) ? "done" : null;
-}
-
-/**
- * A folded Pinned or Forks section lists waiting rows, then done rows, each in section order, then
- * the open thread. `needsYouCount` excludes the open thread unless it needs the user too.
- */
-export function foldSidebarThreadsNeedingYou<T>(
-  section: readonly T[],
-  input: {
-    readonly needsYou: (thread: T) => "waiting" | "done" | null;
-    readonly isRoute: (thread: T) => boolean;
-  },
-): { readonly threads: readonly T[]; readonly needsYouCount: number } {
-  const waiting: T[] = [];
-  const done: T[] = [];
-  let route: T | null = null;
-  for (const thread of section) {
-    const needsYou = input.needsYou(thread);
-    if (needsYou === "waiting") waiting.push(thread);
-    else if (needsYou === "done") done.push(thread);
-    else if (input.isRoute(thread)) route = thread;
-  }
-  const threads = [...waiting, ...done];
-  const needsYouCount = threads.length;
-  if (route !== null) threads.push(route);
-  return { threads, needsYouCount };
 }
 
 /**

@@ -8,6 +8,8 @@ import {
 } from "./Sidebar.drag";
 import {
   resolveSidebarDropTarget,
+  SIDEBAR_GROKBOT_ITEM,
+  sidebarForkGroupId,
   sidebarListItemId,
   sidebarMarkerId,
   type SidebarListItem,
@@ -21,10 +23,12 @@ const thread = (key: string, section: SidebarSection): SidebarListItem => ({
   section,
 });
 const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
+const forks = (key: string): SidebarListItem => ({ kind: "forks", key });
 const pinnedHeader = marker("pinned-header");
 const divider = marker("pinned-divider");
 const settledHeader = marker("settled-header");
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+const grokbot = sidebarListItemId(SIDEBAR_GROKBOT_ITEM);
 
 function layout(
   items: readonly SidebarListItem[],
@@ -32,15 +36,18 @@ function layout(
   over: string,
   scale = 1,
   cardHeight = 82,
+  forkGroupHeight = 22,
 ) {
   let top = 100;
   const rects = items.map((item) => {
     const height =
       item.kind === "thread"
         ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
-        : item.marker === "pinned-header" || item.marker === "pinned-divider"
-          ? 0
-          : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
+        : item.kind === "forks"
+          ? forkGroupHeight * scale
+          : item.marker === "pinned-header" || item.marker === "pinned-divider"
+            ? 0
+            : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
     top += height + 1;
     return rect;
@@ -118,6 +125,37 @@ describe("sidebar collision detection", () => {
       expect(detector(args).map((collision) => collision.id)).toEqual(["source"]);
     },
   );
+
+  it.each([
+    ["a fork line", 3],
+    ["the Grokbot section", 5],
+  ])("never picks %s as the drop target", (_, riderIndex) => {
+    const items = [
+      pinnedHeader,
+      divider,
+      thread("a", "active"),
+      forks("a"),
+      thread("source", "active"),
+      SIDEBAR_GROKBOT_ITEM,
+      settledHeader,
+    ];
+    const args = collisionArgs();
+    const { rects } = layout(items, "source", "a");
+    const collisions = createSidebarCollisionDetection(() => true)({
+      ...args,
+      collisionRect: rects[riderIndex]!,
+      droppableContainers: items.map((item, index) => ({
+        ...args.droppableContainers[0]!,
+        id: sidebarListItemId(item),
+        key: sidebarListItemId(item),
+        rect: { current: rects[index]! },
+      })),
+    });
+    expect(collisions.length).toBeGreaterThan(0);
+    const ids = collisions.map((collision) => collision.id);
+    expect(ids).not.toContain(sidebarForkGroupId("a"));
+    expect(ids).not.toContain(grokbot);
+  });
 
   it.each([
     { sourceSection: "active", pins: 0 },
@@ -528,6 +566,63 @@ describe("sidebar drag projection", () => {
     expect(byTime.get("a2")?.y).toBe(-83);
     expect(byTime.get(sidebarMarkerId("working-header"))).toEqual(stationary);
     expect(byTime.get("w")).toEqual(stationary);
+  });
+
+  it.each([
+    ["collapsed", 22],
+    ["expanded", 96],
+  ] as const)("moves a %s fork line with its parent card", (_, forkGroupHeight) => {
+    const items = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a1", "active"),
+      forks("a1"),
+      thread("a2", "active"),
+      SIDEBAR_GROKBOT_ITEM,
+      marker("working-header"),
+      thread("w", "working"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const strategy = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+      activeOrder: ["a1", "a2", "p"],
+    });
+    const args = layout(items, "p", "a1", 1, 82, forkGroupHeight);
+    const at = (id: string) =>
+      strategy({ ...args, index: items.findIndex((item) => sidebarListItemId(item) === id) });
+    expect(at("a1")?.y).toBe(-83);
+    expect(at(sidebarForkGroupId("a1"))).toEqual({ ...stationary, y: -83 });
+    expect(at("a2")?.y).toBe(-83);
+    expect(at(grokbot)).toEqual(stationary);
+    expect(at(sidebarMarkerId("working-header"))).toEqual(stationary);
+
+    // The dragged parent's line waits under the slot the parent lands in.
+    const dragged = layout(items, "a1", "a2", 1, 82, forkGroupHeight);
+    const lands = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+      activeOrder: ["a2", "a1"],
+    });
+    const of = (id: string) =>
+      lands({ ...dragged, index: items.findIndex((item) => sidebarListItemId(item) === id) });
+    expect(of("a2")?.y).toBe(-84 - forkGroupHeight);
+    expect(of(sidebarForkGroupId("a1"))?.y).toBe(83);
+    expect(of(grokbot)).toEqual(stationary);
+
+    // Grokbot's section rises with the rows when a card above it leaves.
+    const settles = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+    });
+    const settling = layout(items, "a2", sidebarMarkerId("settled-placeholder"));
+    const index = items.findIndex((item) => sidebarListItemId(item) === grokbot);
+    expect(settles({ ...settling, index })).toEqual({ ...stationary, y: -83 });
   });
 
   it("updates the projection when the target or measured geometry changes", () => {

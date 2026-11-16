@@ -24,6 +24,8 @@ export function threadRelationshipStatusLabel(
     case "pending":
     case "queued":
       return resolve(msg("Queued", { $context: "agent status" }));
+    case "needs_you":
+      return resolve(msg("Needs you", { $context: "agent status" }));
     case "waiting":
     case "blocked":
       return resolve(msg("Waiting", { $context: "agent status" }));
