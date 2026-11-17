@@ -1,3 +1,5 @@
+import type { OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
   hasUnseenCompletion,
   resolveSidebarDropTarget,
@@ -227,10 +229,29 @@ export function resolveSidebarVisibleForks<T>(
   return expanded ? forks : forks.filter(isRoute);
 }
 
-/** A Lineage fork row says "Needs you" on the same approvals and questions as its sidebar row. */
-export function lineageForkNeedsYou(
-  thread: { readonly pendingRuntimeRequest?: { readonly kind: string } | null } | null | undefined,
-): boolean {
-  const kind = thread?.pendingRuntimeRequest?.kind;
-  return kind !== undefined && kind !== "auth_refresh";
+/**
+ * A Lineage fork row's status where it differs from its last run's: "Needs you" on the same
+ * approvals and questions as its sidebar row, and "Waiting" while it waits on a child thread or
+ * on background work, as the sidebar shows. Otherwise the run's own status stands.
+ */
+export function lineageForkStatus(
+  thread:
+    | Pick<
+        OrchestrationV2ThreadShell,
+        | "pendingRuntimeRequest"
+        | "blockedOnThreadWait"
+        | "pendingBackgroundTasks"
+        | "activityRunStatus"
+        | "status"
+      >
+    | null
+    | undefined,
+): "needs_you" | "waiting" | undefined {
+  if (thread == null) return undefined;
+  const kind = thread.pendingRuntimeRequest?.kind;
+  if (kind !== undefined && kind !== "auth_refresh") return "needs_you";
+  const runStatus = thread.activityRunStatus ?? thread.status;
+  if (runStatus === "failed") return undefined;
+  if (thread.blockedOnThreadWait === true && runStatus === "running") return "waiting";
+  return backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? []) ? "waiting" : undefined;
 }

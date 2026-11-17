@@ -5,6 +5,7 @@ import {
   groupSidebarFamilies,
   isSidebarForkCalling,
   isSidebarOutsideClientThread,
+  lineageForkStatus,
   placeSidebarFamilies,
   resolveSidebarFamilyRank,
   resolveSidebarFamilyStatus,
@@ -318,5 +319,33 @@ describe("foldSidebarPinnedDropTarget", () => {
         pinnedOrder,
       }),
     ).toBe(activeTarget);
+  });
+});
+
+describe("lineageForkStatus", () => {
+  const done = { status: "completed" };
+  const subagent = { taskId: "t", kind: "subagent", description: "worker" } as const;
+  it.each([
+    ["a finished fork", done, undefined],
+    ["a question", { ...done, pendingRuntimeRequest: { kind: "user_input" } }, "needs_you"],
+    ["a sign-in refresh", { ...done, pendingRuntimeRequest: { kind: "auth_refresh" } }, undefined],
+    [
+      "a finished turn with a worker out",
+      { ...done, pendingBackgroundTasks: [subagent] },
+      "waiting",
+    ],
+    [
+      "a dev server left running",
+      { ...done, pendingBackgroundTasks: [{ taskId: "c", kind: "command", description: "dev" }] },
+      undefined,
+    ],
+    ["a run blocked on a child", { status: "running", blockedOnThreadWait: true }, "waiting"],
+    [
+      "a failure with a worker out",
+      { status: "failed", pendingBackgroundTasks: [subagent] },
+      undefined,
+    ],
+  ] as const)("%s → %s", (_, thread, expected) => {
+    expect(lineageForkStatus(thread as Parameters<typeof lineageForkStatus>[0])).toBe(expected);
   });
 });
