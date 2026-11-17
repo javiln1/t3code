@@ -11,6 +11,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import {
   foldSidebarFamilies,
   groupSidebarFamilies,
+  placeSidebarFamilies,
   isSidebarForkCalling,
   isSidebarOutsideClientThread,
   resolveSidebarFamilyRank,
@@ -135,10 +136,15 @@ export function useSidebarFamilies(input: {
     ? [...outside.live, ...finishedShown]
     : groups.outside.filter(holdsRoute);
 
+  const placed = placeSidebarFamilies(groups, {
+    hasForks: (thread) => forksOf(thread).length > 0,
+    rankOf: familyRankOf,
+  });
+
   return {
     pinnedThreads: groups.pinned,
-    activeThreads: groups.active,
-    workingThreads: groups.working,
+    activeThreads: placed.active,
+    workingThreads: placed.working,
     visiblePinnedThreads: pinnedFold?.families ?? groups.pinned,
     pinnedShelfExpanded,
     togglePinnedShelf: () => setPinnedExpanded((value) => !value),

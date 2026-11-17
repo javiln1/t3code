@@ -5,6 +5,7 @@ import {
   groupSidebarFamilies,
   isSidebarForkCalling,
   isSidebarOutsideClientThread,
+  placeSidebarFamilies,
   resolveSidebarFamilyRank,
   resolveSidebarFamilyStatus,
   resolveSidebarVisibleForks,
@@ -128,7 +129,7 @@ describe("resolveSidebarFamilyStatus", () => {
       ["idle", "done", "needs-you"],
       ["needs-you", "fork1"],
     ],
-    ["running over Done", ["done", "running"], ["running", "fork0"]],
+    ["a fork's unread Done over the parent's run", ["running", "done"], ["done", "fork0"]],
     [
       "the parent's own status when it ties a fork",
       ["needs-you", "needs-you"],
@@ -136,8 +137,8 @@ describe("resolveSidebarFamilyStatus", () => {
     ],
     [
       "the parent's own status when it outranks the forks",
-      ["running", "done", "idle"],
-      ["running", null],
+      ["done", "running", "idle"],
+      ["done", null],
     ],
   ] as const)("shows %s", (_, [parent, ...forks], expected) => {
     expect(status(parent, ...forks)).toEqual(expected);
@@ -152,6 +153,36 @@ describe("isSidebarForkCalling", () => {
     [{ rank: "needs-you", from: null }, false],
   ] as const)("keeps %o folded open: %s", (status, expected) => {
     expect(isSidebarForkCalling(status)).toBe(expected);
+  });
+});
+
+describe("placeSidebarFamilies", () => {
+  const ranks: Record<string, SidebarFamilyRank> = {
+    hqWaiting: "running",
+    hqDone: "done",
+    hqAsking: "needs-you",
+    hqIdle: "idle",
+    solo: "running",
+    runner: "running",
+  };
+  const place = (active: readonly string[], working: readonly string[]) =>
+    placeSidebarFamilies(
+      { active, working },
+      { hasForks: (key) => key.startsWith("hq"), rankOf: (key) => ranks[key]! },
+    );
+
+  it("moves a family with only work going to Working, and a loud one to the top", () => {
+    expect(place(["hqIdle", "hqWaiting", "solo"], ["runner", "hqDone", "hqAsking"])).toEqual({
+      active: ["hqDone", "hqAsking", "hqIdle", "solo"],
+      working: ["hqWaiting", "runner"],
+    });
+  });
+
+  it("leaves threads without forks where their own status put them", () => {
+    const groups = { active: ["solo"], working: ["runner"] };
+    expect(
+      placeSidebarFamilies(groups, { hasForks: () => false, rankOf: (key) => ranks[key]! }),
+    ).toBe(groups);
   });
 });
 

@@ -5,8 +5,8 @@ import {
   type SidebarSection,
 } from "./Sidebar.logic";
 
-/** A family's loudest state, most urgent first. */
-const SIDEBAR_FAMILY_RANKS = ["needs-you", "running", "done", "idle"] as const;
+/** A family's loudest state, most urgent first. An unread Done outranks work still going. */
+const SIDEBAR_FAMILY_RANKS = ["needs-you", "done", "running", "idle"] as const;
 export type SidebarFamilyRank = (typeof SIDEBAR_FAMILY_RANKS)[number];
 
 type FamilyStatusInput = Parameters<typeof hasUnseenCompletion>[0] &
@@ -130,6 +130,32 @@ export function groupSidebarFamilies<T>(input: {
     working: tops.working.filter(inside),
     outside,
     forksByParentKey,
+  };
+}
+
+/**
+ * A family with forks sits by its loudest rank, not its parent's: one with nothing for the user
+ * but work still going moves to Working, and a fork asking or done brings it back to the top.
+ */
+export function placeSidebarFamilies<T>(
+  groups: { readonly active: readonly T[]; readonly working: readonly T[] },
+  input: {
+    readonly hasForks: (thread: T) => boolean;
+    readonly rankOf: (family: T) => SidebarFamilyRank;
+  },
+): { readonly active: readonly T[]; readonly working: readonly T[] } {
+  const loud = (thread: T) => {
+    const rank = input.rankOf(thread);
+    return rank === "needs-you" || rank === "done";
+  };
+  const toWorking = groups.active.filter(
+    (thread) => input.hasForks(thread) && input.rankOf(thread) === "running",
+  );
+  const toActive = groups.working.filter((thread) => input.hasForks(thread) && loud(thread));
+  if (toWorking.length === 0 && toActive.length === 0) return groups;
+  return {
+    active: [...toActive, ...groups.active.filter((thread) => !toWorking.includes(thread))],
+    working: [...toWorking, ...groups.working.filter((thread) => !toActive.includes(thread))],
   };
 }
 
