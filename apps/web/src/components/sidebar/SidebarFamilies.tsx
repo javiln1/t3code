@@ -1,4 +1,5 @@
 import { useSortable } from "@dnd-kit/sortable";
+import { T, useGT } from "gt-react";
 import { CSS as DndCSS } from "@dnd-kit/utilities";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { BotIcon, ChevronRightIcon, EyeIcon, EyeOffIcon, GitForkIcon } from "lucide-react";
@@ -160,7 +161,11 @@ export function useSidebarFamilies(input: {
     grokbot: {
       count: outside.live.length,
       total: groups.outside.length,
-      loud: groups.outside.some((thread) => familyRankOf(thread) === "needs-you"),
+      // An unread Done lights the dot too: Grokbot threads finish while you're elsewhere.
+      loud: groups.outside.some((thread) => {
+        const rank = familyRankOf(thread);
+        return rank === "needs-you" || rank === "done";
+      }),
       expanded: grokbotExpanded,
       onToggle: () => setGrokbotExpanded((value) => !value),
       live: grokbotExpanded ? outside.live : groups.outside.filter(holdsRoute),
@@ -210,10 +215,11 @@ export function useSidebarFamilyStatusSource(from: SidebarThreadSummary | null |
 /** A fork's branch, or the robot on a thread an outside client (Grokbot) launched. */
 export function SidebarRowLineageIcon(props: { thread: SidebarThreadSummary }) {
   const { thread } = props;
+  const gt = useGT();
   if (thread.lineage.relationshipToParent === "fork") {
     return (
       <GitForkIcon
-        aria-label="Forked thread"
+        aria-label={gt("Forked thread")}
         role="img"
         className="size-3 shrink-0 text-muted-foreground/65"
       />
@@ -222,7 +228,7 @@ export function SidebarRowLineageIcon(props: { thread: SidebarThreadSummary }) {
   if (!isSidebarOutsideClientThread(thread)) return null;
   return (
     <BotIcon
-      aria-label={`Started by ${thread.source.launchedByClient}`}
+      aria-label={gt("Started by {client}", { client: thread.source.launchedByClient })}
       role="img"
       className="size-3 shrink-0 text-muted-foreground/65"
     />
@@ -257,6 +263,7 @@ export function SidebarForkGroup(props: {
   onToggle: () => void;
   children: ReactNode;
 }) {
+  const gt = useGT();
   const noun = props.count === 1 ? "fork" : "forks";
   const stop = (event: ReactMouseEvent) => event.stopPropagation();
   const rider = useSidebarRiderSortable(sidebarForkGroupId(props.parentKey));
@@ -283,7 +290,7 @@ export function SidebarForkGroup(props: {
       {Children.count(props.children) > 0 ? (
         <ul
           role="presentation"
-          aria-label="Forks"
+          aria-label={gt("Forks")}
           className="ms-3 flex flex-col gap-px border-s border-sidebar-border ps-1"
         >
           {props.children}
@@ -294,10 +301,11 @@ export function SidebarForkGroup(props: {
 }
 
 function NeedsYouDot() {
+  const gt = useGT();
   return (
     <span
       role="img"
-      aria-label="Something here needs you"
+      aria-label={gt("Something here needs a look")}
       className="size-1.5 shrink-0 rounded-full bg-muted-foreground"
     />
   );
@@ -379,7 +387,7 @@ export function SidebarGrokbotSection(props: {
           >
             <span className="inline-flex items-center gap-1.5">
               <BotIcon aria-hidden className="size-3.5 shrink-0" />
-              Grokbot
+              <T>Grokbot</T>
             </span>
           </CollapsibleSectionHeader>
         </li>
